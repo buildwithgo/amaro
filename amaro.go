@@ -7,7 +7,7 @@ import (
 
 type Handler func(*Context) error
 
-type Middleware func(*Context, func() error) error
+type Middleware func(next Handler) Handler
 
 type App struct {
 	router      Router
@@ -103,15 +103,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) executeWithMiddlewares(ctx *Context, handler Handler) error {
-	index := 0
-	var next func() error
-	next = func() error {
-		if index >= len(a.middlewares) {
-			return handler(ctx)
-		}
-		middleware := a.middlewares[index]
-		index++
-		return middleware(ctx, next)
+	for i := len(a.middlewares) - 1; i >= 0; i-- {
+		handler = a.middlewares[i](handler)
 	}
-	return next()
+	return handler(ctx)
 }

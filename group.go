@@ -2,8 +2,6 @@ package amaro
 
 import "net/http"
 
-
-
 type Group struct {
 	prefix      string
 	router      Router
@@ -19,25 +17,13 @@ func NewGroup(prefix string, router Router) *Group {
 }
 
 func (g *Group) wrapWithMiddlewares(handler Handler) Handler {
-	return func(ctx *Context) error {
-		index := 0
-
-		var next func() error
-		next = func() error {
-			if index >= len(g.middlewares) {
-				return handler(ctx)
-			}
-
-			middleware := g.middlewares[index]
-			index++
-			return middleware(ctx, next)
-		}
-
-		return next()
+	for i := len(g.middlewares) - 1; i >= 0; i-- {
+		handler = g.middlewares[i](handler)
 	}
+	return handler
 }
 
- func (g *Group) Use(middleware Middleware) {
+func (g *Group) Use(middleware Middleware) {
 	g.middlewares = append(g.middlewares, middleware)
 }
 
