@@ -1,10 +1,13 @@
 package amaro
 
-import "net/http"
+import (
+	"net/http"
+)
 
 type Context struct {
-	Request *http.Request
-	Writer  http.ResponseWriter
+	Request    *http.Request
+	Writer     http.ResponseWriter
+	PathParams map[string]string // Path parameters
 }
 
 type ContextOption func(*Context)
@@ -19,4 +22,10 @@ func NewContext(w http.ResponseWriter, r *http.Request, options ...ContextOption
 		option(ctx)
 	}
 	return ctx
+}
+
+func (c *Context) String(statusCode int, s string) error {
+	c.Writer.WriteHeader(statusCode)
+	_, err := c.Writer.Write([]byte(s))
+	return err
 }
