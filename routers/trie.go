@@ -68,7 +68,7 @@ func (r *TrieRouter) findNode(method, path string) (*trieNode, map[string]string
 			matched := false
 			for key, dyn := range node.children {
 				if len(key) > 1 && key[0] == '{' && key[len(key)-1] == '}' {
-					paramName := key[1:len(key)-1]
+					paramName := key[1 : len(key)-1]
 					params[paramName] = part
 					node = dyn
 					matched = true
