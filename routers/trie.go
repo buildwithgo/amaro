@@ -9,10 +9,8 @@ import (
 )
 
 type trieNode struct {
-	children    map[string]*trieNode // static and dynamic children unified
-	path        string               // the path segment for this node (e.g. "hello" or "{name}")
-	handler     amaro.Handler
-	middlewares []amaro.Middleware
+	children map[string]*trieNode
+	amaro.Route
 }
 
 type TrieRouter struct {
@@ -32,25 +30,18 @@ func (r *TrieRouter) Use(mw amaro.Middleware) {
 
 func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares ...amaro.Middleware) error {
 	if _, ok := r.root[method]; !ok {
-		r.root[method] = &trieNode{children: make(map[string]*trieNode), path: ""}
+		r.root[method] = &trieNode{children: make(map[string]*trieNode)}
 	}
 	node := r.root[method]
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	for _, part := range parts {
-		if len(part) > 1 && part[0] == '{' && part[len(part)-1] == '}' {
-			if _, ok := node.children[part]; !ok {
-				node.children[part] = &trieNode{children: make(map[string]*trieNode), path: part}
-			}
-			node = node.children[part]
-		} else {
-			if _, ok := node.children[part]; !ok {
-				node.children[part] = &trieNode{children: make(map[string]*trieNode), path: part}
-			}
-			node = node.children[part]
+		if _, ok := node.children[part]; !ok {
+			node.children[part] = &trieNode{children: make(map[string]*trieNode)}
 		}
+		node = node.children[part]
 	}
-	node.handler = handler
-	node.middlewares = middlewares
+	node.Handler = handler
+	node.Middlewares = middlewares
 	return nil
 }
 
@@ -80,7 +71,7 @@ func (r *TrieRouter) findNode(method, path string) (*trieNode, map[string]string
 			}
 		}
 	}
-	if node.handler == nil {
+	if node.Handler == nil {
 		return nil, nil, fmt.Errorf("route not found")
 	}
 	return node, params, nil
@@ -93,13 +84,13 @@ func (r *TrieRouter) Find(method, path string) (*amaro.Route, error) {
 	}
 	wrappedHandler := func(ctx *amaro.Context) error {
 		ctx.PathParams = params
-		return node.handler(ctx)
+		return node.Handler(ctx)
 	}
 	return &amaro.Route{
 		Method:      method,
 		Path:        path,
 		Handler:     wrappedHandler,
-		Middlewares: node.middlewares,
+		Middlewares: node.Middlewares,
 	}, nil
 }
 
