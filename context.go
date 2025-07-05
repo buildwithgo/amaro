@@ -97,3 +97,7 @@ func (c *Context) GetCookie(name string) (*http.Cookie, error) {
 	}
 	return cookie, nil
 }
+
+func (c *Context) Status(statusCode int) {
+	c.Writer.WriteHeader(statusCode)
+}
