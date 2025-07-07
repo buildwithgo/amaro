@@ -74,6 +74,8 @@ func New(options ...AppOption) *App {
 }
 
 func (a *App) Run(port string) error {
+	compiledMiddlewares := Chain(a.middlewares...)
+	a.middlewares = []Middleware{compiledMiddlewares}
 	if !strings.HasPrefix(port, ":") {
 		port = ":" + port
 	}
@@ -91,20 +93,25 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	done := make(chan error, 1)
-	go func() {
-		done <- a.executeWithMiddlewares(&ctx, route.Handler)
-	}()
-
-	if err := <-done; err != nil {
+	allMiddlewares := append(route.Middlewares, a.middlewares...)
+	if err := Compile(route.Handler, allMiddlewares...)(&ctx); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
 
-func (a *App) executeWithMiddlewares(ctx *Context, handler Handler) error {
-	for i := len(a.middlewares) - 1; i >= 0; i-- {
-		handler = a.middlewares[i](handler)
+func Chain(middlewares ...Middleware) Middleware {
+	return func(next Handler) Handler {
+		for i := len(middlewares) - 1; i >= 0; i-- {
+			next = middlewares[i](next)
+		}
+		return next
 	}
-	return handler(ctx)
+}
+
+func Compile(hendler Handler, middlewares ...Middleware) Handler {
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		hendler = middlewares[i](hendler)
+	}
+	return hendler
 }

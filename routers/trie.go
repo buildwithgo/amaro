@@ -33,13 +33,20 @@ func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares
 		r.root[method] = &trieNode{children: make(map[string]*trieNode)}
 	}
 	node := r.root[method]
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	for _, part := range parts {
-		if _, ok := node.children[part]; !ok {
-			node.children[part] = &trieNode{children: make(map[string]*trieNode)}
+	path = strings.Trim(path, "/")
+	if path != "" {
+		parts := strings.Split(path, "/")
+		for _, part := range parts {
+			if part == "" {
+				continue
+			}
+			if _, ok := node.children[part]; !ok {
+				node.children[part] = &trieNode{children: make(map[string]*trieNode)}
+			}
+			node = node.children[part]
 		}
-		node = node.children[part]
 	}
+
 	node.Handler = handler
 	node.Middlewares = middlewares
 	return nil
@@ -50,8 +57,9 @@ func (r *TrieRouter) findNode(method, path string) (*trieNode, map[string]string
 	if !ok {
 		return nil, nil, fmt.Errorf("method not found")
 	}
-	parts := strings.Split(strings.Trim(path, "/"), "/")
 	params := make(map[string]string)
+	path = strings.Trim(path, "/")
+	parts := strings.Split(path, "/")
 	for _, part := range parts {
 		if n, ok := node.children[part]; ok {
 			node = n

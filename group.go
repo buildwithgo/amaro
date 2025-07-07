@@ -1,6 +1,9 @@
 package amaro
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 type Group struct {
 	prefix      string
@@ -16,26 +19,16 @@ func NewGroup(prefix string, router Router) *Group {
 	}
 }
 
-func (g *Group) wrapWithMiddlewares(handler Handler) Handler {
-	for i := len(g.middlewares) - 1; i >= 0; i-- {
-		handler = g.middlewares[i](handler)
-	}
-	return handler
-}
-
 func (g *Group) Use(middleware Middleware) {
 	g.middlewares = append(g.middlewares, middleware)
 }
 
 func (g *Group) Add(method, path string, handler Handler, middlewares ...Middleware) error {
-	path = g.prefix + path
-	if len(middlewares) > 0 {
-		handler = g.wrapWithMiddlewares(handler)
-		middlewares = append(g.middlewares, middlewares...)
-	} else {
-		middlewares = g.middlewares
-	}
-	return g.router.GET(path, handler, middlewares...)
+	var fullPath strings.Builder
+	fullPath.Grow(len(g.prefix) + len(path)) // Pre-allocate capacity
+	fullPath.WriteString(g.prefix)
+	fullPath.WriteString(path)
+	return g.router.Add(method, fullPath.String(), handler, middlewares...)
 }
 
 func (g *Group) GET(path string, handler Handler, middlewares ...Middleware) error {
@@ -71,6 +64,9 @@ func (g *Group) Group(prefix string) *Group {
 }
 
 func (g *Group) Find(method, path string) (*Route, error) {
-	path = g.prefix + path
+	var fullPath strings.Builder
+	fullPath.Grow(len(g.prefix) + len(path))
+	fullPath.WriteString(g.prefix)
+	fullPath.WriteString(path)
 	return g.router.Find(method, path)
 }
