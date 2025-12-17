@@ -2,6 +2,7 @@ package amaro
 
 import "io/fs"
 
+// Route represents a registered route.
 type Route struct {
 	Method      string
 	Path        string
@@ -9,6 +10,8 @@ type Route struct {
 	Middlewares []Middleware
 }
 
+// Router is the interface that all router implementations must satisfy.
+// It allows for swappable routing strategies.
 type Router interface {
 	GET(path string, handler Handler, middlewares ...Middleware) error
 	POST(path string, handler Handler, middlewares ...Middleware) error
@@ -24,6 +27,7 @@ type Router interface {
 	StaticFS(pathPrefix string, fs fs.FS)
 }
 
+// WithRouter returns an AppOption that configures the App to use the specified router.
 func WithRouter(router Router) AppOption {
 	return func(app *App) {
 		app.router = router

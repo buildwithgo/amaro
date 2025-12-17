@@ -13,9 +13,6 @@ import (
 	"github.com/buildwithgo/amaro/routers"
 )
 
-//go:embed .local/*
-var localFS embed.FS
-
 func TestStaticFS(t *testing.T) {
 	app := amaro.New(amaro.WithRouter(routers.NewTrieRouter()))
 
@@ -60,6 +57,8 @@ func TestStaticFS(t *testing.T) {
 	// With //go:embed .local/*, the fs root contains ".local" directory.
 	// We usually want to strip that or serve from root.
 	// Let's serve strict.
+
+	var localFS embed.FS
 
 	// We need to use fs.Sub to get into .local if we want /files/hello.txt to map to .local/hello.txt directly
 	// without the client adding .local in path.

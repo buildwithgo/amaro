@@ -5,12 +5,15 @@ import (
 	"net/http"
 )
 
-// Param is a single URL parameter, consisting of a key and a value.
+// Param represents a single URL parameter, consisting of a key and a value.
 type Param struct {
 	Key   string
 	Value string
 }
 
+// Context represents the context of the current HTTP request.
+// It holds the request and response objects, URL parameters, and provides helper methods.
+// It is designed to be reused via sync.Pool to minimize allocations.
 type Context struct {
 	Request *http.Request
 	Writer  http.ResponseWriter

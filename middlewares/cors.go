@@ -7,9 +7,13 @@ import (
 	"github.com/buildwithgo/amaro"
 )
 
+// CORSConfig defines the configuration for the CORS middleware.
 type CORSConfig struct {
+	// AllowOrigins is a list of origins a cross-domain request can be executed from.
 	AllowOrigins []string
+	// AllowMethods is a list of methods the client is allowed to use with cross-domain requests.
 	AllowMethods []string
+	// AllowHeaders is a list of non-simple headers the client is allowed to use with cross-domain requests.
 	AllowHeaders []string
 }
 

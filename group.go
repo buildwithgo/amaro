@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// Group represents a route group with a common path prefix and shared middlewares.
 type Group struct {
 	prefix      string
 	router      Router
@@ -20,6 +21,8 @@ func NewGroup(prefix string, router Router) *Group {
 	}
 }
 
+// Use adds a middleware to the group.
+// These middlewares are applied to all routes registered in this group.
 func (g *Group) Use(middleware Middleware) {
 	g.middlewares = append(g.middlewares, middleware)
 }

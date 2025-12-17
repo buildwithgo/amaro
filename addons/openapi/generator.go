@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// Generator holds the OpenAPI specification and provides methods to add routes and schemas.
 type Generator struct {
 	Spec *OpenAPI
 }

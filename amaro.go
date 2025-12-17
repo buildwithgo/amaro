@@ -1,3 +1,4 @@
+// Package amaro implements a blazing fast, zero-dependency, zero-allocation HTTP router and framework for Go.
 package amaro
 
 import (
@@ -7,20 +8,28 @@ import (
 	"sync"
 )
 
+// Handler is a function that handles an HTTP request.
+// It returns an error which can be handled by middlewares or the framework.
 type Handler func(*Context) error
 
+// Middleware is a function that wraps a Handler to provide additional functionality.
 type Middleware func(next Handler) Handler
 
+// App is the main entry point for the Amaro framework.
+// It holds the router, global middlewares, and a context pool.
 type App struct {
 	router      Router
 	middlewares []Middleware
 	pool        *sync.Pool
 }
 
+// Use adds a global middleware to the application.
+// Global middlewares are applied to all routes in the order they are added.
 func (a *App) Use(middleware Middleware) {
 	a.middlewares = append(a.middlewares, middleware)
 }
 
+// GET registers a new GET route with a handler and optional route-specific middlewares.
 func (a *App) GET(path string, handler Handler, middlewares ...Middleware) error {
 	return a.router.Add(http.MethodGet, path, handler, middlewares...)
 }
@@ -49,6 +58,7 @@ func (a *App) HEAD(path string, handler Handler, middlewares ...Middleware) erro
 	return a.router.Add(http.MethodHead, path, handler, middlewares...)
 }
 
+// Add registers a new route with the specified method, path, handler, and middlewares.
 func (a *App) Add(method, path string, handler Handler, middlewares ...Middleware) error {
 	return a.router.Add(method, path, handler, middlewares...)
 }
@@ -65,8 +75,10 @@ func (a *App) Find(method, path string) (*Route, error) {
 	return a.router.Find(method, path, nil)
 }
 
+// AppOption defines a function to configure the App during initialization.
 type AppOption func(*App)
 
+// New creates a new instance of the Amaro App with optional configuration.
 func New(options ...AppOption) *App {
 	app := &App{
 		middlewares: make([]Middleware, 0),
