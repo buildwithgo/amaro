@@ -5,19 +5,41 @@ import (
 	"net/http"
 )
 
+// Param represents a single URL parameter, consisting of a key and a value.
+type Param struct {
+	Key   string
+	Value string
+}
+
+// Context represents the context of the current HTTP request.
+// It holds the request and response objects, URL parameters, and provides helper methods.
+// It is designed to be reused via sync.Pool to minimize allocations.
 type Context struct {
-	Request    *http.Request
-	Writer     http.ResponseWriter
-	PathParams map[string]string // Path parameters
+	Request *http.Request
+	Writer  http.ResponseWriter
+	Params  []Param // efficient slice instead of map
 }
 
 type ContextOption func(*Context)
+
+// Reset resets the context to be reused in sync.Pool
+func (c *Context) Reset(w http.ResponseWriter, r *http.Request) {
+	c.Request = r
+	c.Writer = w
+	// Resize params slice to capacity to avoid allocation if possible
+	if cap(c.Params) < 10 {
+		c.Params = make([]Param, 0, 10)
+	} else {
+		c.Params = c.Params[:0]
+	}
+}
 
 // NewContext creates a new context for the request
 func NewContext(w http.ResponseWriter, r *http.Request, options ...ContextOption) *Context {
 	ctx := &Context{
 		Request: r,
 		Writer:  w,
+		Params:  make([]Param, 0, 10),
 	}
 	for _, option := range options {
 		option(ctx)
@@ -66,10 +88,16 @@ func (c *Context) QueryParam(name string) string {
 }
 
 func (c *Context) PathParam(name string) string {
-	if c.PathParams == nil {
-		return ""
+	for _, p := range c.Params {
+		if p.Key == name {
+			return p.Value
+		}
 	}
-	return c.PathParams[name]
+	return ""
+}
+
+func (c *Context) AddParam(key, value string) {
+	c.Params = append(c.Params, Param{Key: key, Value: value})
 }
 
 func (c *Context) SetHeader(key, value string) {

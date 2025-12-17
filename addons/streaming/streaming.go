@@ -8,6 +8,8 @@ import (
 	"github.com/buildwithgo/amaro"
 )
 
+// StreamContext wraps the standard Context and adds a Flusher.
+// It allows modifying the response before or during the stream.
 type StreamContext struct {
 	amaro.Context
 	flusher http.Flusher
@@ -20,6 +22,9 @@ func (c *StreamContext) Write(data []byte) (int, error) {
 	return c.Context.Writer.Write(data)
 }
 
+// Stream initiates a basic streaming response.
+// It sets proper headers (Connection: keep-alive) and provides a StreamContext
+// to the callback for flushing data manually.
 func Stream(ctx *amaro.Context, call func(StreamContext)) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
@@ -51,6 +56,7 @@ func (s *StreamTextContext) WriteLn(line string, args ...any) (int, error) {
 	return s.sc.Write([]byte(fmt.Sprintf(line, args...) + "\n"))
 }
 
+// StreamText initiates a text/plain streaming response with chunked transfer encoding.
 func StreamText(ctx *amaro.Context, call func(*StreamTextContext)) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")

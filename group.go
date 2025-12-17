@@ -1,10 +1,12 @@
 package amaro
 
 import (
+	"io/fs"
 	"net/http"
 	"strings"
 )
 
+// Group represents a route group with a common path prefix and shared middlewares.
 type Group struct {
 	prefix      string
 	router      Router
@@ -19,6 +21,8 @@ func NewGroup(prefix string, router Router) *Group {
 	}
 }
 
+// Use adds a middleware to the group.
+// These middlewares are applied to all routes registered in this group.
 func (g *Group) Use(middleware Middleware) {
 	g.middlewares = append(g.middlewares, middleware)
 }
@@ -64,9 +68,17 @@ func (g *Group) Group(prefix string) *Group {
 }
 
 func (g *Group) Find(method, path string) (*Route, error) {
+	return g.router.Find(method, g.calculatePath(path), nil)
+}
+
+func (g *Group) StaticFS(pathPrefix string, fs fs.FS) {
+	g.router.StaticFS(g.calculatePath(pathPrefix), fs)
+}
+
+func (g *Group) calculatePath(path string) string {
 	var fullPath strings.Builder
 	fullPath.Grow(len(g.prefix) + len(path))
 	fullPath.WriteString(g.prefix)
 	fullPath.WriteString(path)
-	return g.router.Find(method, path)
+	return fullPath.String()
 }
