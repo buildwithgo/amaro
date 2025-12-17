@@ -1,6 +1,7 @@
 package amaro
 
 import (
+	"io/fs"
 	"net/http"
 	"strings"
 )
@@ -64,9 +65,17 @@ func (g *Group) Group(prefix string) *Group {
 }
 
 func (g *Group) Find(method, path string) (*Route, error) {
+	return g.router.Find(method, g.calculatePath(path), nil)
+}
+
+func (g *Group) StaticFS(pathPrefix string, fs fs.FS) {
+	g.router.StaticFS(g.calculatePath(pathPrefix), fs)
+}
+
+func (g *Group) calculatePath(path string) string {
 	var fullPath strings.Builder
 	fullPath.Grow(len(g.prefix) + len(path))
 	fullPath.WriteString(g.prefix)
 	fullPath.WriteString(path)
-	return g.router.Find(method, fullPath.String(), nil)
+	return fullPath.String()
 }

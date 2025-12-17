@@ -1,5 +1,7 @@
 package amaro
 
+import "io/fs"
+
 type Route struct {
 	Method      string
 	Path        string
@@ -19,6 +21,7 @@ type Router interface {
 	Use(middleware Middleware)
 	Group(prefix string) *Group
 	Find(method, path string, ctx *Context) (*Route, error)
+	StaticFS(pathPrefix string, fs fs.FS)
 }
 
 func WithRouter(router Router) AppOption {

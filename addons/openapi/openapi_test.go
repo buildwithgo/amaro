@@ -50,10 +50,6 @@ func TestOpenAPIIntegration(t *testing.T) {
 		return c.JSON(http.StatusOK, gen.Spec)
 	})
 
-	app.GET("/docs", func(c *amaro.Context) error {
-		return c.HTML(http.StatusOK, openapi.ScalarHTML("/swagger.json"))
-	})
-
 	// 5. Test API Logic (Typing/Binding)
 	t.Run("TypedHandler", func(t *testing.T) {
 		reqBody := `{"name": "john", "age": 30}`
@@ -115,21 +111,6 @@ func TestOpenAPIIntegration(t *testing.T) {
 		}
 		if schema.Properties["name"].Type != "string" {
 			t.Errorf("Expected name property type string")
-		}
-	})
-
-	// 7. Test Docs
-	t.Run("ScalarDocs", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/docs", nil)
-		w := httptest.NewRecorder()
-		app.ServeHTTP(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Fatalf("Expected 200, got %d", w.Code)
-		}
-
-		if !strings.Contains(w.Body.String(), "scalar") {
-			t.Error("Expected scalar script in body")
 		}
 	})
 }

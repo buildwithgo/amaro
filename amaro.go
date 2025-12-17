@@ -1,6 +1,7 @@
 package amaro
 
 import (
+	"io/fs"
 	"net/http"
 	"strings"
 	"sync"
@@ -54,6 +55,10 @@ func (a *App) Add(method, path string, handler Handler, middlewares ...Middlewar
 
 func (a *App) Group(prefix string) *Group {
 	return a.router.Group(prefix)
+}
+
+func (a *App) StaticFS(pathPrefix string, fs fs.FS) {
+	a.router.StaticFS(pathPrefix, fs)
 }
 
 func (a *App) Find(method, path string) (*Route, error) {
