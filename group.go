@@ -68,5 +68,5 @@ func (g *Group) Find(method, path string) (*Route, error) {
 	fullPath.Grow(len(g.prefix) + len(path))
 	fullPath.WriteString(g.prefix)
 	fullPath.WriteString(path)
-	return g.router.Find(method, path)
+	return g.router.Find(method, fullPath.String(), nil)
 }

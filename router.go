@@ -18,7 +18,7 @@ type Router interface {
 	Add(method, path string, handler Handler, middlewares ...Middleware) error
 	Use(middleware Middleware)
 	Group(prefix string) *Group
-	Find(method, path string) (*Route, error)
+	Find(method, path string, ctx *Context) (*Route, error)
 }
 
 func WithRouter(router Router) AppOption {

@@ -3,6 +3,7 @@ package amaro
 import (
 	"net/http"
 	"strings"
+	"sync"
 )
 
 type Handler func(*Context) error
@@ -12,6 +13,7 @@ type Middleware func(next Handler) Handler
 type App struct {
 	router      Router
 	middlewares []Middleware
+	pool        *sync.Pool
 }
 
 func (a *App) Use(middleware Middleware) {
@@ -55,15 +57,21 @@ func (a *App) Group(prefix string) *Group {
 }
 
 func (a *App) Find(method, path string) (*Route, error) {
-	return a.router.Find(method, path)
+	return a.router.Find(method, path, nil)
 }
 
 type AppOption func(*App)
 
-// New creates a new Amaro app instance
 func New(options ...AppOption) *App {
 	app := &App{
 		middlewares: make([]Middleware, 0),
+		pool: &sync.Pool{
+			New: func() interface{} {
+				// We can't fully init here because we need w/r, but we create the struct
+				// The slice capacity is set in context.go
+				return NewContext(nil, nil)
+			},
+		},
 	}
 
 	for _, option := range options {
@@ -84,17 +92,19 @@ func (a *App) Run(port string) error {
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := Context{
-		Request: r,
-		Writer:  w,
-	}
-	route, err := a.router.Find(r.Method, r.URL.Path)
+	ctx := a.pool.Get().(*Context)
+	ctx.Reset(w, r)
+	defer a.pool.Put(ctx)
+
+	// Pass ctx to Find so it can populate params without allocation
+	route, err := a.router.Find(r.Method, r.URL.Path, ctx)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	allMiddlewares := append(route.Middlewares, a.middlewares...)
-	if err := Compile(route.Handler, allMiddlewares...)(&ctx); err != nil {
+	// route.Middlewares are already compiled into route.Handler
+	// We only need to apply global middlewares
+	if err := Compile(route.Handler, a.middlewares...)(ctx); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
