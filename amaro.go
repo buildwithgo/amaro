@@ -108,6 +108,18 @@ func (a *App) Run(port string) error {
 	return http.ListenAndServe(port, a)
 }
 
+// RunTLS starts the server with TLS enabled (HTTPS).
+// This automatically enables HTTP/2 support.
+func (a *App) RunTLS(port, certFile, keyFile string) error {
+	compiledMiddlewares := Chain(a.middlewares...)
+	a.middlewares = []Middleware{compiledMiddlewares}
+	if !strings.HasPrefix(port, ":") {
+		port = ":" + port
+	}
+
+	return http.ListenAndServeTLS(port, certFile, keyFile, a)
+}
+
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := a.pool.Get().(*Context)
 	ctx.Reset(w, r)
