@@ -2,8 +2,40 @@ package amaro
 
 import (
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 )
+
+// FormFile returns the first file for the provided form key.
+func (c *Context) FormFile(name string) (*multipart.FileHeader, error) {
+	_, fh, err := c.Request.FormFile(name)
+	return fh, err
+}
+
+// SaveFile saves the uploaded file to the specified destination.
+func (c *Context) SaveFile(file *multipart.FileHeader, dst string) error {
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	if err = os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+		return err
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, src)
+	return err
+}
 
 // Param represents a single URL parameter, consisting of a key and a value.
 type Param struct {
@@ -18,6 +50,7 @@ type Context struct {
 	Request *http.Request
 	Writer  http.ResponseWriter
 	Params  []Param // efficient slice instead of map
+	Keys    map[string]interface{}
 }
 
 type ContextOption func(*Context)
@@ -32,6 +65,8 @@ func (c *Context) Reset(w http.ResponseWriter, r *http.Request) {
 	} else {
 		c.Params = c.Params[:0]
 	}
+	// Reset Keys (nil them out or create new map if needed)
+	c.Keys = nil
 }
 
 // NewContext creates a new context for the request
@@ -40,6 +75,7 @@ func NewContext(w http.ResponseWriter, r *http.Request, options ...ContextOption
 		Request: r,
 		Writer:  w,
 		Params:  make([]Param, 0, 10),
+		Keys:    nil,
 	}
 	for _, option := range options {
 		option(ctx)
@@ -128,4 +164,20 @@ func (c *Context) GetCookie(name string) (*http.Cookie, error) {
 
 func (c *Context) Status(statusCode int) {
 	c.Writer.WriteHeader(statusCode)
+}
+
+// Set stores a new key-value pair in the context for this request.
+func (c *Context) Set(key string, value interface{}) {
+	if c.Keys == nil {
+		c.Keys = make(map[string]interface{})
+	}
+	c.Keys[key] = value
+}
+
+// Get retrieves a value from the context.
+func (c *Context) Get(key string) (value interface{}, exists bool) {
+	if c.Keys != nil {
+		value, exists = c.Keys[key]
+	}
+	return
 }

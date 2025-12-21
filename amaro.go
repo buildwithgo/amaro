@@ -2,10 +2,17 @@
 package amaro
 
 import (
+	"context"
+	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 )
 
 // Handler is a function that handles an HTTP request.
@@ -98,26 +105,66 @@ func New(options ...AppOption) *App {
 	return app
 }
 
-func (a *App) Run(port string) error {
-	compiledMiddlewares := Chain(a.middlewares...)
-	a.middlewares = []Middleware{compiledMiddlewares}
-	if !strings.HasPrefix(port, ":") {
-		port = ":" + port
-	}
-
-	return http.ListenAndServe(port, a)
+// Run starts the HTTP server with graceful shutdown support.
+func (a *App) Run(address string) error {
+	return a.startServer(address, "", "")
 }
 
-// RunTLS starts the server with TLS enabled (HTTPS).
-// This automatically enables HTTP/2 support.
-func (a *App) RunTLS(port, certFile, keyFile string) error {
-	compiledMiddlewares := Chain(a.middlewares...)
-	a.middlewares = []Middleware{compiledMiddlewares}
-	if !strings.HasPrefix(port, ":") {
-		port = ":" + port
+// RunTLS starts the HTTPS server with graceful shutdown support.
+func (a *App) RunTLS(address, certFile, keyFile string) error {
+	return a.startServer(address, certFile, keyFile)
+}
+
+func (a *App) startServer(address, certFile, keyFile string) error {
+	if !strings.HasPrefix(address, ":") {
+		address = ":" + address
 	}
 
-	return http.ListenAndServeTLS(port, certFile, keyFile, a)
+	compiledMiddlewares := Chain(a.middlewares...)
+	a.middlewares = []Middleware{compiledMiddlewares}
+
+	srv := &http.Server{
+		Addr:    address,
+		Handler: a,
+	}
+
+	// Channel to listen for errors coming from the listener.
+	serverErrors := make(chan error, 1)
+
+	go func() {
+		log.Printf("Server is starting on %s...", address)
+		if certFile != "" && keyFile != "" {
+			serverErrors <- srv.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			serverErrors <- srv.ListenAndServe()
+		}
+	}()
+
+	// Buffered channel to receive OS signals.
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+
+	// Block until a signal is received or an error occurs
+	select {
+	case err := <-serverErrors:
+		return fmt.Errorf("server error: %w", err)
+
+	case sig := <-shutdown:
+		log.Printf("shutdown started: signal %v", sig)
+
+		// Create a context with a timeout for the shutdown process.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// Ask the server to shut down gracefully.
+		if err := srv.Shutdown(ctx); err != nil {
+			// Force close if graceful shutdown fails
+			srv.Close()
+			return fmt.Errorf("could not stop server gracefully: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
