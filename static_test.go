@@ -1,13 +1,13 @@
 package amaro_test
 
 import (
-	"embed"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/buildwithgo/amaro"
 	"github.com/buildwithgo/amaro/routers"
@@ -53,16 +53,17 @@ func TestStaticFS(t *testing.T) {
 		}
 	})
 
-	// 2. EmbedFS
-	// With //go:embed .local/*, the fs root contains ".local" directory.
-	// We usually want to strip that or serve from root.
-	// Let's serve strict.
+	// 2. EmbedFS Simulation using fstest.MapFS
+	// This mocks an embedded filesystem where .local is the root or a subdir.
+	// We use MapFS to simulate "embedded" files.
 
-	var localFS embed.FS
+	mockFS := fstest.MapFS{
+		".local/hello.txt":     &fstest.MapFile{Data: []byte("Hello Local")},
+		".local/test_file.txt": &fstest.MapFile{Data: []byte("Content of test file")},
+	}
 
-	// We need to use fs.Sub to get into .local if we want /files/hello.txt to map to .local/hello.txt directly
-	// without the client adding .local in path.
-	subFS, _ := fs.Sub(localFS, ".local")
+	// Sub to get into .local
+	subFS, _ := fs.Sub(mockFS, ".local")
 	app.StaticFS("/embed", subFS)
 
 	t.Run("ServeEmbed", func(t *testing.T) {
@@ -81,7 +82,7 @@ func TestStaticFS(t *testing.T) {
 		req2 := httptest.NewRequest("GET", "/embed/test_file.txt", nil)
 		w2 := httptest.NewRecorder()
 		app.ServeHTTP(w2, req2)
-		// Trim space because echo might add newline
+
 		if w2.Code != http.StatusOK {
 			t.Errorf("Expected 200 for test_file.txt, got %d", w2.Code)
 		}

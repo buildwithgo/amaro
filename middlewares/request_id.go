@@ -7,7 +7,9 @@ import (
 	"github.com/buildwithgo/amaro"
 )
 
-// RequestID adds an X-Request-ID header to the response.
+const RequestIDKey = "request_id"
+
+// RequestID adds an X-Request-ID header to the response and context.
 func RequestID() amaro.Middleware {
 	return func(next amaro.Handler) amaro.Handler {
 		return func(c *amaro.Context) error {
@@ -18,6 +20,7 @@ func RequestID() amaro.Middleware {
 				rid = hex.EncodeToString(id)
 			}
 			c.Writer.Header().Set("X-Request-ID", rid)
+			c.Set(RequestIDKey, rid)
 			return next(c)
 		}
 	}
