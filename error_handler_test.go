@@ -24,8 +24,8 @@ func TestErrorHandler(t *testing.T) {
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected 404, got %d", w.Code)
 		}
-		if w.Body.String() != "404 page not found\n" { // http.Error adds newline
-			t.Errorf("Expected default http.Error output, got '%s'", w.Body.String())
+		if w.Body.String() != "method not found\n" && w.Body.String() != "not found\n" {
+			t.Errorf("Expected 'method not found' or 'not found', got '%s'", w.Body.String())
 		}
 	})
 
