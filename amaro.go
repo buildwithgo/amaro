@@ -22,14 +22,25 @@ type Handler func(*Context) error
 // Middleware is a function that wraps a Handler to provide additional functionality.
 type Middleware func(next Handler) Handler
 
+// ErrorHandler is a function that handles errors occurred during request processing.
+type ErrorHandler func(c *Context, err error, code int)
+
 // App is the main entry point for the Amaro framework.
 // It holds the router, global middlewares, and a context pool.
 type App struct {
-	router      Router
-	middlewares []Middleware
-	pool        *sync.Pool
-	handler     Handler
-	once        sync.Once
+	router       Router
+	middlewares  []Middleware
+	pool         *sync.Pool
+	handler      Handler
+	once         sync.Once
+	errorHandler ErrorHandler
+}
+
+// WithErrorHandler returns an AppOption that configures the App to use the specified ErrorHandler.
+func WithErrorHandler(handler ErrorHandler) AppOption {
+	return func(app *App) {
+		app.errorHandler = handler
+	}
 }
 
 // Use adds a global middleware to the application.
@@ -97,6 +108,9 @@ func New(options ...AppOption) *App {
 				// The slice capacity is set in context.go
 				return NewContext(nil, nil)
 			},
+		},
+		errorHandler: func(c *Context, err error, code int) {
+			http.Error(c.Writer, err.Error(), code)
 		},
 	}
 
@@ -183,7 +197,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer a.pool.Put(ctx)
 
 	if err := a.handler(ctx); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		a.errorHandler(ctx, err, http.StatusInternalServerError)
 		return
 	}
 }
@@ -200,7 +214,7 @@ func (a *App) dispatch(c *Context) error {
 	// Pass ctx to Find so it can populate params without allocation
 	route, err := a.router.Find(c.Request.Method, c.Request.URL.Path, c)
 	if err != nil {
-		http.Error(c.Writer, err.Error(), http.StatusNotFound)
+		a.errorHandler(c, err, http.StatusNotFound)
 		return nil
 	}
 	// route.Middlewares are already compiled into route.Handler
