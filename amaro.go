@@ -28,6 +28,8 @@ type App struct {
 	router      Router
 	middlewares []Middleware
 	pool        *sync.Pool
+	handler     Handler
+	once        sync.Once
 }
 
 // Use adds a global middleware to the application.
@@ -120,8 +122,10 @@ func (a *App) startServer(address, certFile, keyFile string) error {
 		address = ":" + address
 	}
 
-	compiledMiddlewares := Chain(a.middlewares...)
-	a.middlewares = []Middleware{compiledMiddlewares}
+	// We do NOT modify a.middlewares here anymore.
+	// setup() will ignore any middlewares added after first compile if not careful,
+	// but standard app lifecycle is: New -> Use... -> Run.
+	// We just rely on Dispatch compiled in setup().
 
 	srv := &http.Server{
 		Addr:    address,
@@ -132,6 +136,7 @@ func (a *App) startServer(address, certFile, keyFile string) error {
 	serverErrors := make(chan error, 1)
 
 	go func() {
+		a.setup() // Ensure middlewares are compiled before starting
 		log.Printf("Server is starting on %s...", address)
 		if certFile != "" && keyFile != "" {
 			serverErrors <- srv.ListenAndServeTLS(certFile, keyFile)
@@ -168,22 +173,38 @@ func (a *App) startServer(address, certFile, keyFile string) error {
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Ensure the handler chain is built (Lazy init for testing/direct usage)
+	if a.handler == nil {
+		a.setup()
+	}
+
 	ctx := a.pool.Get().(*Context)
 	ctx.Reset(w, r)
 	defer a.pool.Put(ctx)
 
-	// Pass ctx to Find so it can populate params without allocation
-	route, err := a.router.Find(r.Method, r.URL.Path, ctx)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	// route.Middlewares are already compiled into route.Handler
-	// We only need to apply global middlewares
-	if err := Compile(route.Handler, a.middlewares...)(ctx); err != nil {
+	if err := a.handler(ctx); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+func (a *App) setup() {
+	a.once.Do(func() {
+		// Compile the global middlewares with the router handler (dispatch)
+		// This ensures that global middlewares run even if the route is not found
+		a.handler = Compile(a.dispatch, a.middlewares...)
+	})
+}
+
+func (a *App) dispatch(c *Context) error {
+	// Pass ctx to Find so it can populate params without allocation
+	route, err := a.router.Find(c.Request.Method, c.Request.URL.Path, c)
+	if err != nil {
+		http.Error(c.Writer, err.Error(), http.StatusNotFound)
+		return nil
+	}
+	// route.Middlewares are already compiled into route.Handler
+	return route.Handler(c)
 }
 
 func Chain(middlewares ...Middleware) Middleware {
@@ -195,9 +216,9 @@ func Chain(middlewares ...Middleware) Middleware {
 	}
 }
 
-func Compile(hendler Handler, middlewares ...Middleware) Handler {
+func Compile(handler Handler, middlewares ...Middleware) Handler {
 	for i := len(middlewares) - 1; i >= 0; i-- {
-		hendler = middlewares[i](hendler)
+		handler = middlewares[i](handler)
 	}
-	return hendler
+	return handler
 }
