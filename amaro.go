@@ -91,6 +91,11 @@ func (a *App) StaticFS(pathPrefix string, fs fs.FS) {
 	a.router.StaticFS(pathPrefix, fs)
 }
 
+// Static serves files from the local filesystem.
+func (a *App) Static(pathPrefix, root string) {
+	a.StaticFS(pathPrefix, os.DirFS(root))
+}
+
 func (a *App) Find(method, path string) (*Route, error) {
 	return a.router.Find(method, path, nil)
 }
@@ -110,6 +115,15 @@ func New(options ...AppOption) *App {
 			},
 		},
 		errorHandler: func(c *Context, err error, code int) {
+			if he, ok := err.(*HTTPError); ok {
+				code = he.Code
+				if msg, ok := he.Message.(string); ok {
+					http.Error(c.Writer, msg, code)
+				} else {
+					http.Error(c.Writer, http.StatusText(code), code)
+				}
+				return
+			}
 			http.Error(c.Writer, err.Error(), code)
 		},
 	}

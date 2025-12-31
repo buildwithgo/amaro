@@ -181,11 +181,10 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 }
 
 func (r *TrieRouter) StaticFS(pathPrefix string, fsys fs.FS) {
-	fileServer := http.FileServer(http.FS(fsys))
-	handler := func(c *amaro.Context) error {
-		http.StripPrefix(pathPrefix, fileServer).ServeHTTP(c.Writer, c.Request)
-		return nil
-	}
+	handler := amaro.StaticHandler(amaro.StaticConfig{
+		Root:   fsys,
+		Prefix: pathPrefix,
+	})
 
 	// Register pathPrefix (without trailing /) and pathPrefix/*filepath
 	path := strings.TrimRight(pathPrefix, "/")
