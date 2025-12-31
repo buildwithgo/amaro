@@ -23,18 +23,55 @@ type node struct {
 	amaro.Route
 }
 
+// TrieRouterConfig defines configuration for TrieRouter.
+type TrieRouterConfig struct {
+	// ParamStart is the character that starts a named parameter (e.g., ':').
+	ParamStart byte
+	// ParamPrefix is the prefix for bracketed parameters (e.g., "{").
+	ParamPrefix string
+	// ParamSuffix is the suffix for bracketed parameters (e.g., "}").
+	ParamSuffix string
+}
+
+// DefaultTrieRouterConfig returns the default configuration.
+func DefaultTrieRouterConfig() TrieRouterConfig {
+	return TrieRouterConfig{
+		ParamStart:  ':',
+		ParamPrefix: "{",
+		ParamSuffix: "}",
+	}
+}
+
 // TrieRouter is a trie-based router using a map for children.
 // It supports :param and *wildcard parameters.
 type TrieRouter struct {
 	root              map[string]*node // method -> root node
 	globalMiddlewares []amaro.Middleware
+	config            TrieRouterConfig
+}
+
+// TrieRouterOption configures TrieRouter.
+type TrieRouterOption func(*TrieRouter)
+
+// WithParamConfig sets the parameter syntax configuration.
+func WithParamConfig(start byte, prefix, suffix string) TrieRouterOption {
+	return func(r *TrieRouter) {
+		r.config.ParamStart = start
+		r.config.ParamPrefix = prefix
+		r.config.ParamSuffix = suffix
+	}
 }
 
 // NewTrieRouter creates a new instance of TrieRouter.
-func NewTrieRouter() *TrieRouter {
-	return &TrieRouter{
-		root: make(map[string]*node),
+func NewTrieRouter(opts ...TrieRouterOption) *TrieRouter {
+	r := &TrieRouter{
+		root:   make(map[string]*node),
+		config: DefaultTrieRouterConfig(),
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Use adds a global middleware to the router.
@@ -47,7 +84,6 @@ func (r *TrieRouter) Use(middleware amaro.Middleware) {
 func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares ...amaro.Middleware) error {
 	// Prepend router-level middlewares to the route-specific middlewares
 	if len(r.globalMiddlewares) > 0 {
-		// Create a new slice to avoid modifying the original middlewares slice if reusing
 		combined := make([]amaro.Middleware, 0, len(r.globalMiddlewares)+len(middlewares))
 		combined = append(combined, r.globalMiddlewares...)
 		combined = append(combined, middlewares...)
@@ -76,19 +112,30 @@ func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares
 			}
 
 			// Check if it's a param or wildcard
-			if part[0] == ':' || (len(part) > 1 && part[0] == '{' && part[len(part)-1] == '}') {
-				// Param
-				pName := part[1:]
-				if part[0] == '{' {
-					pName = part[1 : len(part)-1]
-				}
+			isParam := false
+			paramName := ""
 
+			// Check single char prefix (e.g. :id)
+			if r.config.ParamStart != 0 && len(part) > 0 && part[0] == r.config.ParamStart {
+				isParam = true
+				paramName = part[1:]
+			}
+
+			// Check bracketed prefix (e.g. {id})
+			if !isParam && r.config.ParamPrefix != "" && r.config.ParamSuffix != "" {
+				if strings.HasPrefix(part, r.config.ParamPrefix) && strings.HasSuffix(part, r.config.ParamSuffix) {
+					isParam = true
+					paramName = part[len(r.config.ParamPrefix) : len(part)-len(r.config.ParamSuffix)]
+				}
+			}
+
+			if isParam {
 				if n.paramNode == nil {
 					n.paramNode = &node{children: make(map[string]*node)}
-					n.paramName = pName
+					n.paramName = paramName
 				}
-				if n.paramName != pName {
-					return fmt.Errorf("param name conflict: %s vs %s", n.paramName, pName)
+				if n.paramName != paramName {
+					return fmt.Errorf("param name conflict: %s vs %s", n.paramName, paramName)
 				}
 				n = n.paramNode
 			} else if part[0] == '*' {
@@ -102,20 +149,6 @@ func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares
 					return fmt.Errorf("wildcard name conflict: %s vs %s", n.catchAllName, wName)
 				}
 				n = n.catchAllNode
-				// Wildcard must be the last element usually
-				// We return/break?
-				// If there are more parts after wildcard, it's weird but we'll allow adding to catchAllNode
-				// effectively treating wildcard as a segment.
-				// BUT standard wildcard matches EVERYTHING remaining.
-				// So we should stop here?
-				// If the user defines /files/*path/extra, it's ambiguous.
-				// We assume *path captures everything. So we should NOT continue.
-				// BUT checking the loop, we iterate parts.
-				// If we continue, we add children to catchAllNode.
-				// This implies *path matches one segment.
-				// Trie usually: *path matches REST.
-				// So this node should be the terminal handler node (mostly).
-				// We will continue to allow defining children, but Find logic will decide.
 			} else {
 				// Static
 				if n.children == nil {
@@ -159,15 +192,10 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 
 	// Zero-allocation iteration
 	for len(searchPath) > 0 || n != nil {
-		// If consumed whole path
 		if len(searchPath) == 0 {
-			// Exact match handler?
 			if n.Handler != nil {
 				return &n.Route, nil
 			}
-			// Check if we have a catchAll that matches empty?
-			// Usually * matches rest. If rest is empty, it depends on implementation.
-			// Hono: /a/* -> /a/ matches? Yes. /a matches? Maybe.
 			if n.catchAllNode != nil {
 				if ctx != nil {
 					ctx.AddParam(n.catchAllName, "")
@@ -213,20 +241,15 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 		// 3. CatchAll
 		if n.catchAllNode != nil {
 			if ctx != nil {
-				// Capture remaining path
 				value := part
 				if len(searchPath) > 0 {
 					value += "/" + searchPath
 				}
 				ctx.AddParam(n.catchAllName, value)
 			}
-			// CatchAll consumes everything, so we are done traversing parts.
-			// But we need to return the route from the child node.
 			if n.catchAllNode.Handler != nil {
 				return &n.catchAllNode.Route, nil
 			}
-			// If catchAllNode has no handler?
-			// It should.
 			return nil, fmt.Errorf("route not found")
 		}
 
@@ -242,7 +265,6 @@ func (r *TrieRouter) StaticFS(pathPrefix string, fsys fs.FS) {
 		Prefix: pathPrefix,
 	})
 
-	// Register pathPrefix (without trailing /) and pathPrefix/*filepath
 	path := strings.TrimRight(pathPrefix, "/")
 	r.Add(http.MethodGet, path, handler)
 	r.Add(http.MethodHead, path, handler)
