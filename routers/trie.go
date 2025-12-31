@@ -215,7 +215,7 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 					return &n.catchAllNode.Route, nil
 				}
 			}
-			return nil, fmt.Errorf("route not found")
+			return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
 		}
 
 		var part string
@@ -261,13 +261,13 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 			if n.catchAllNode.Handler != nil {
 				return &n.catchAllNode.Route, nil
 			}
-			return nil, fmt.Errorf("route not found")
+			return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
 		}
 
-		return nil, fmt.Errorf("route not found")
+		return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
 	}
 
-	return nil, fmt.Errorf("route not found")
+	return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
 }
 
 func (r *TrieRouter) StaticFS(pathPrefix string, fsys fs.FS) {

@@ -14,7 +14,7 @@
 - **Zero Dependency**: Runs on pure Go standard library.
 - **Blazing Fast**: Optimized Trie-based router with zero-allocation context pooling.
 - **Decoupled Architecture**: Router implementation is fully decoupled from the core framework.
-- **Configurable Syntax**: Support for customizable parameter delimiters (e.g. `:id` or `{id}`).
+- **Configurable Syntax**: Support for customizable parameter delimiters (e.g. `:id` or `{id}`) via pluggable parsers.
 - **Robust Static Serving**: Built-in support for serving static files, SPAs, and directory browsing (configurable).
 - **Production-Grade Middlewares**: Includes Auth (Basic, Key, Session, RBAC), CORS, Cache, and more.
 - **Group Routing**: Organize routes with prefixes and shared middlewares.
@@ -60,13 +60,19 @@ func main() {
 
 ### Customizing Router Syntax
 
-Amaro's TrieRouter supports configurable parameter syntax. You can use standard colon syntax (`:id`) or brackets (`{id}`), or define your own.
+Amaro's TrieRouter is fully decoupled from the syntax it parses. You can define custom rules for identifying parameters using `ParamParser` functions.
 
 ```go
+// Custom parser for <id> syntax
+customParser := func(segment string) (bool, string) {
+    if len(segment) > 2 && segment[0] == '<' && segment[len(segment)-1] == '>' {
+        return true, segment[1 : len(segment)-1]
+    }
+    return false, ""
+}
+
 config := routers.DefaultTrieRouterConfig()
-// Enable custom bracket syntax if desired (default is {} and :)
-config.ParamPrefix = "<"
-config.ParamSuffix = ">"
+config.ParamParser = customParser
 
 r := routers.NewTrieRouter(routers.WithConfig(config))
 app := amaro.New(amaro.WithRouter(r))
