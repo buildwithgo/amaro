@@ -10,6 +10,47 @@ type Route struct {
 	Middlewares []Middleware
 }
 
+// ParamParser defines a function that checks if a path segment is a parameter.
+// It returns true and the parameter name if it is, false otherwise.
+type ParamParser func(segment string) (bool, string)
+
+// WildcardParser defines a function that checks if a path segment is a wildcard.
+// It returns true and the wildcard name if it is, false otherwise.
+type WildcardParser func(segment string) (bool, string)
+
+// RouterConfig defines configuration for Router.
+type RouterConfig struct {
+	ParamParser    ParamParser
+	WildcardParser WildcardParser
+}
+
+// DefaultParamParser implements the standard :param and {param} syntax.
+func DefaultParamParser(segment string) (bool, string) {
+	if len(segment) > 0 && segment[0] == ':' {
+		return true, segment[1:]
+	}
+	if len(segment) > 2 && segment[0] == '{' && segment[len(segment)-1] == '}' {
+		return true, segment[1 : len(segment)-1]
+	}
+	return false, ""
+}
+
+// DefaultWildcardParser implements the standard *wildcard syntax.
+func DefaultWildcardParser(segment string) (bool, string) {
+	if len(segment) > 0 && segment[0] == '*' {
+		return true, segment[1:]
+	}
+	return false, ""
+}
+
+// DefaultRouterConfig returns the default configuration.
+func DefaultRouterConfig() RouterConfig {
+	return RouterConfig{
+		ParamParser:    DefaultParamParser,
+		WildcardParser: DefaultWildcardParser,
+	}
+}
+
 // Router is the interface that all router implementations must satisfy.
 // It allows for swappable routing strategies.
 type Router interface {

@@ -1,17 +1,15 @@
-package middlewares
+package amaro
 
 import (
 	"fmt"
 	"net/http"
 	"runtime"
-
-	"github.com/buildwithgo/amaro"
 )
 
 // Recovery recovers from panics, logs the stack trace, and returns an Internal Server Error.
-func Recovery() amaro.Middleware {
-	return func(next amaro.Handler) amaro.Handler {
-		return func(c *amaro.Context) error {
+func Recovery() Middleware {
+	return func(next Handler) Handler {
+		return func(c *Context) error {
 			defer func() {
 				if err := recover(); err != nil {
 					stack := make([]byte, 4096)

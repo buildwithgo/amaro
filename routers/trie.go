@@ -23,60 +23,19 @@ type node struct {
 	amaro.Route
 }
 
-// ParamParser defines a function that checks if a path segment is a parameter.
-// It returns true and the parameter name if it is, false otherwise.
-type ParamParser func(segment string) (bool, string)
-
-// WildcardParser defines a function that checks if a path segment is a wildcard.
-// It returns true and the wildcard name if it is, false otherwise.
-type WildcardParser func(segment string) (bool, string)
-
-// TrieRouterConfig defines configuration for TrieRouter.
-type TrieRouterConfig struct {
-	ParamParser    ParamParser
-	WildcardParser WildcardParser
-}
-
-// DefaultParamParser implements the standard :param and {param} syntax.
-func DefaultParamParser(segment string) (bool, string) {
-	if len(segment) > 0 && segment[0] == ':' {
-		return true, segment[1:]
-	}
-	if len(segment) > 2 && segment[0] == '{' && segment[len(segment)-1] == '}' {
-		return true, segment[1 : len(segment)-1]
-	}
-	return false, ""
-}
-
-// DefaultWildcardParser implements the standard *wildcard syntax.
-func DefaultWildcardParser(segment string) (bool, string) {
-	if len(segment) > 0 && segment[0] == '*' {
-		return true, segment[1:]
-	}
-	return false, ""
-}
-
-// DefaultTrieRouterConfig returns the default configuration.
-func DefaultTrieRouterConfig() TrieRouterConfig {
-	return TrieRouterConfig{
-		ParamParser:    DefaultParamParser,
-		WildcardParser: DefaultWildcardParser,
-	}
-}
-
 // TrieRouter is a trie-based router using a map for children.
 // It supports :param and *wildcard parameters.
 type TrieRouter struct {
 	root              map[string]*node // method -> root node
 	globalMiddlewares []amaro.Middleware
-	config            TrieRouterConfig
+	config            amaro.RouterConfig
 }
 
 // TrieRouterOption configures TrieRouter.
 type TrieRouterOption func(*TrieRouter)
 
 // WithConfig sets the router configuration.
-func WithConfig(config TrieRouterConfig) TrieRouterOption {
+func WithConfig(config amaro.RouterConfig) TrieRouterOption {
 	return func(r *TrieRouter) {
 		r.config = config
 	}
@@ -86,7 +45,7 @@ func WithConfig(config TrieRouterConfig) TrieRouterOption {
 func NewTrieRouter(opts ...TrieRouterOption) *TrieRouter {
 	r := &TrieRouter{
 		root:   make(map[string]*node),
-		config: DefaultTrieRouterConfig(),
+		config: amaro.DefaultRouterConfig(),
 	}
 	for _, opt := range opts {
 		opt(r)

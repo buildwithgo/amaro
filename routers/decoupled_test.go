@@ -16,7 +16,7 @@ func TestDecoupledParamSyntax(t *testing.T) {
 		return false, ""
 	}
 
-	config := DefaultTrieRouterConfig()
+	config := amaro.DefaultRouterConfig()
 	config.ParamParser = customParser
 
 	r := NewTrieRouter(WithConfig(config))

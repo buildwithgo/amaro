@@ -14,7 +14,7 @@ import (
 func TestMiddlewares(t *testing.T) {
 	app := amaro.New(amaro.WithRouter(routers.NewTrieRouter()))
 
-	app.Use(middlewares.Recovery())
+	// app.Use(amaro.Recovery()) // Already added by default in amaro.New()
 	app.Use(middlewares.RequestID())
 	app.Use(middlewares.Secure())
 	app.Use(middlewares.CORS())
