@@ -23,22 +23,44 @@ type node struct {
 	amaro.Route
 }
 
+// ParamParser defines a function that checks if a path segment is a parameter.
+// It returns true and the parameter name if it is, false otherwise.
+type ParamParser func(segment string) (bool, string)
+
+// WildcardParser defines a function that checks if a path segment is a wildcard.
+// It returns true and the wildcard name if it is, false otherwise.
+type WildcardParser func(segment string) (bool, string)
+
 // TrieRouterConfig defines configuration for TrieRouter.
 type TrieRouterConfig struct {
-	// ParamStart is the character that starts a named parameter (e.g., ':').
-	ParamStart byte
-	// ParamPrefix is the prefix for bracketed parameters (e.g., "{").
-	ParamPrefix string
-	// ParamSuffix is the suffix for bracketed parameters (e.g., "}").
-	ParamSuffix string
+	ParamParser    ParamParser
+	WildcardParser WildcardParser
+}
+
+// DefaultParamParser implements the standard :param and {param} syntax.
+func DefaultParamParser(segment string) (bool, string) {
+	if len(segment) > 0 && segment[0] == ':' {
+		return true, segment[1:]
+	}
+	if len(segment) > 2 && segment[0] == '{' && segment[len(segment)-1] == '}' {
+		return true, segment[1 : len(segment)-1]
+	}
+	return false, ""
+}
+
+// DefaultWildcardParser implements the standard *wildcard syntax.
+func DefaultWildcardParser(segment string) (bool, string) {
+	if len(segment) > 0 && segment[0] == '*' {
+		return true, segment[1:]
+	}
+	return false, ""
 }
 
 // DefaultTrieRouterConfig returns the default configuration.
 func DefaultTrieRouterConfig() TrieRouterConfig {
 	return TrieRouterConfig{
-		ParamStart:  ':',
-		ParamPrefix: "{",
-		ParamSuffix: "}",
+		ParamParser:    DefaultParamParser,
+		WildcardParser: DefaultWildcardParser,
 	}
 }
 
@@ -53,12 +75,10 @@ type TrieRouter struct {
 // TrieRouterOption configures TrieRouter.
 type TrieRouterOption func(*TrieRouter)
 
-// WithParamConfig sets the parameter syntax configuration.
-func WithParamConfig(start byte, prefix, suffix string) TrieRouterOption {
+// WithConfig sets the router configuration.
+func WithConfig(config TrieRouterConfig) TrieRouterOption {
 	return func(r *TrieRouter) {
-		r.config.ParamStart = start
-		r.config.ParamPrefix = prefix
-		r.config.ParamSuffix = suffix
+		r.config = config
 	}
 }
 
@@ -111,22 +131,15 @@ func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares
 				continue
 			}
 
-			// Check if it's a param or wildcard
-			isParam := false
-			paramName := ""
-
-			// Check single char prefix (e.g. :id)
-			if r.config.ParamStart != 0 && len(part) > 0 && part[0] == r.config.ParamStart {
-				isParam = true
-				paramName = part[1:]
+			// Use configured parsers
+			isParam, paramName := false, ""
+			if r.config.ParamParser != nil {
+				isParam, paramName = r.config.ParamParser(part)
 			}
 
-			// Check bracketed prefix (e.g. {id})
-			if !isParam && r.config.ParamPrefix != "" && r.config.ParamSuffix != "" {
-				if strings.HasPrefix(part, r.config.ParamPrefix) && strings.HasSuffix(part, r.config.ParamSuffix) {
-					isParam = true
-					paramName = part[len(r.config.ParamPrefix) : len(part)-len(r.config.ParamSuffix)]
-				}
+			isWildcard, wildcardName := false, ""
+			if !isParam && r.config.WildcardParser != nil {
+				isWildcard, wildcardName = r.config.WildcardParser(part)
 			}
 
 			if isParam {
@@ -138,15 +151,13 @@ func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares
 					return fmt.Errorf("param name conflict: %s vs %s", n.paramName, paramName)
 				}
 				n = n.paramNode
-			} else if part[0] == '*' {
-				// Wildcard
-				wName := part[1:]
+			} else if isWildcard {
 				if n.catchAllNode == nil {
 					n.catchAllNode = &node{children: make(map[string]*node)}
-					n.catchAllName = wName
+					n.catchAllName = wildcardName
 				}
-				if n.catchAllName != wName {
-					return fmt.Errorf("wildcard name conflict: %s vs %s", n.catchAllName, wName)
+				if n.catchAllName != wildcardName {
+					return fmt.Errorf("wildcard name conflict: %s vs %s", n.catchAllName, wildcardName)
 				}
 				n = n.catchAllNode
 			} else {
