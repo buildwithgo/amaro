@@ -9,83 +9,215 @@ import (
 	"github.com/buildwithgo/amaro"
 )
 
-type trieNode struct {
-	children map[string]*trieNode
+type node struct {
+	// Static children
+	children map[string]*node
+
+	// Dynamic children
+	paramNode    *node
+	paramName    string
+
+	catchAllNode *node
+	catchAllName string
+
 	amaro.Route
 }
 
-type TrieRouter struct {
-	root              map[string]*trieNode // method -> root node
-	globalMiddlewares []amaro.Middleware
+// ParamParser defines a function that checks if a path segment is a parameter.
+// It returns true and the parameter name if it is, false otherwise.
+type ParamParser func(segment string) (bool, string)
+
+// WildcardParser defines a function that checks if a path segment is a wildcard.
+// It returns true and the wildcard name if it is, false otherwise.
+type WildcardParser func(segment string) (bool, string)
+
+// TrieRouterConfig defines configuration for TrieRouter.
+type TrieRouterConfig struct {
+	ParamParser    ParamParser
+	WildcardParser WildcardParser
 }
 
-func NewTrieRouter() *TrieRouter {
-	return &TrieRouter{
-		root: make(map[string]*trieNode),
+// DefaultParamParser implements the standard :param and {param} syntax.
+func DefaultParamParser(segment string) (bool, string) {
+	if len(segment) > 0 && segment[0] == ':' {
+		return true, segment[1:]
+	}
+	if len(segment) > 2 && segment[0] == '{' && segment[len(segment)-1] == '}' {
+		return true, segment[1 : len(segment)-1]
+	}
+	return false, ""
+}
+
+// DefaultWildcardParser implements the standard *wildcard syntax.
+func DefaultWildcardParser(segment string) (bool, string) {
+	if len(segment) > 0 && segment[0] == '*' {
+		return true, segment[1:]
+	}
+	return false, ""
+}
+
+// DefaultTrieRouterConfig returns the default configuration.
+func DefaultTrieRouterConfig() TrieRouterConfig {
+	return TrieRouterConfig{
+		ParamParser:    DefaultParamParser,
+		WildcardParser: DefaultWildcardParser,
 	}
 }
 
-func (r *TrieRouter) Use(mw amaro.Middleware) {
-	r.globalMiddlewares = append(r.globalMiddlewares, mw)
+// TrieRouter is a trie-based router using a map for children.
+// It supports :param and *wildcard parameters.
+type TrieRouter struct {
+	root              map[string]*node // method -> root node
+	globalMiddlewares []amaro.Middleware
+	config            TrieRouterConfig
+}
+
+// TrieRouterOption configures TrieRouter.
+type TrieRouterOption func(*TrieRouter)
+
+// WithConfig sets the router configuration.
+func WithConfig(config TrieRouterConfig) TrieRouterOption {
+	return func(r *TrieRouter) {
+		r.config = config
+	}
+}
+
+// NewTrieRouter creates a new instance of TrieRouter.
+func NewTrieRouter(opts ...TrieRouterOption) *TrieRouter {
+	r := &TrieRouter{
+		root:   make(map[string]*node),
+		config: DefaultTrieRouterConfig(),
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+// Use adds a global middleware to the router.
+// Note: These middlewares are applied to all routes registered AFTER calling Use.
+// They are wrapped around the handler in Add.
+func (r *TrieRouter) Use(middleware amaro.Middleware) {
+	r.globalMiddlewares = append(r.globalMiddlewares, middleware)
 }
 
 func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares ...amaro.Middleware) error {
+	// Prepend router-level middlewares to the route-specific middlewares
+	if len(r.globalMiddlewares) > 0 {
+		combined := make([]amaro.Middleware, 0, len(r.globalMiddlewares)+len(middlewares))
+		combined = append(combined, r.globalMiddlewares...)
+		combined = append(combined, middlewares...)
+		middlewares = combined
+	}
 	if _, ok := r.root[method]; !ok {
-		r.root[method] = &trieNode{children: make(map[string]*trieNode)}
+		r.root[method] = &node{children: make(map[string]*node)}
 	}
-	node := r.root[method]
-	path = strings.Trim(path, "/")
-	if path != "" {
-		parts := strings.Split(path, "/")
-		for _, part := range parts {
-			if part == "" {
-				continue
-			}
-			if _, ok := node.children[part]; !ok {
-				node.children[part] = &trieNode{children: make(map[string]*trieNode)}
-			}
-			node = node.children[part]
-		}
+	n := r.root[method]
+
+	// Normalize path
+	if path == "" {
+		path = "/"
 	}
-
-	// Pre-compile middlewares into the handler to avoid per-request chain construction
-	// Iterate backwards to wrap the handler
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		handler = middlewares[i](handler)
-	}
-
-	node.Handler = handler
-	node.Middlewares = nil // Middlewares are now baked into the handler
-	node.Middlewares = nil // Middlewares are now baked into the handler
-	return nil
-}
-
-func (r *TrieRouter) StaticFS(pathPrefix string, fsys fs.FS) {
-	// Create a handler that serves from fs
-	fileServer := http.FileServer(http.FS(fsys))
-	handler := func(c *amaro.Context) error {
-		http.StripPrefix(pathPrefix, fileServer).ServeHTTP(c.Writer, c.Request)
-		return nil
-	}
-
-	// Register GET/HEAD for pathPrefix/*
-	// We use a wildcard route. We need to support it in Add/Find.
-	// Convention: /assets/*filepath
-	path := strings.TrimRight(pathPrefix, "/") + "/*filepath"
-	r.Add(http.MethodGet, path, handler)
-	r.Add(http.MethodHead, path, handler)
-}
-
-func (r *TrieRouter) findNode(method, path string, ctx *amaro.Context) (*trieNode, error) {
-	node, ok := r.root[method]
-	if !ok {
-		return nil, fmt.Errorf("method not found")
+	if path[0] != '/' {
+		path = "/" + path
 	}
 
 	searchPath := strings.Trim(path, "/")
 
-	// Zero-alloc path iteration
-	for len(searchPath) > 0 {
+	if searchPath != "" {
+		parts := strings.Split(searchPath, "/")
+		for _, part := range parts {
+			if part == "" {
+				continue
+			}
+
+			// Use configured parsers
+			isParam, paramName := false, ""
+			if r.config.ParamParser != nil {
+				isParam, paramName = r.config.ParamParser(part)
+			}
+
+			isWildcard, wildcardName := false, ""
+			if !isParam && r.config.WildcardParser != nil {
+				isWildcard, wildcardName = r.config.WildcardParser(part)
+			}
+
+			if isParam {
+				if n.paramNode == nil {
+					n.paramNode = &node{children: make(map[string]*node)}
+					n.paramName = paramName
+				}
+				if n.paramName != paramName {
+					return fmt.Errorf("param name conflict: %s vs %s", n.paramName, paramName)
+				}
+				n = n.paramNode
+			} else if isWildcard {
+				if n.catchAllNode == nil {
+					n.catchAllNode = &node{children: make(map[string]*node)}
+					n.catchAllName = wildcardName
+				}
+				if n.catchAllName != wildcardName {
+					return fmt.Errorf("wildcard name conflict: %s vs %s", n.catchAllName, wildcardName)
+				}
+				n = n.catchAllNode
+			} else {
+				// Static
+				if n.children == nil {
+					n.children = make(map[string]*node)
+				}
+				if _, ok := n.children[part]; !ok {
+					n.children[part] = &node{children: make(map[string]*node)}
+				}
+				n = n.children[part]
+			}
+		}
+	}
+
+	// Compile middlewares into handler
+	finalHandler := handler
+	if len(middlewares) > 0 {
+		finalHandler = amaro.Compile(handler, middlewares...)
+	}
+
+	n.Handler = finalHandler
+	n.Middlewares = middlewares
+	n.Path = path
+	n.Method = method
+
+	return nil
+}
+
+func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route, error) {
+	n, ok := r.root[method]
+	if !ok {
+		return nil, fmt.Errorf("method not found")
+	}
+
+	searchPath := path
+	if len(searchPath) > 0 && searchPath[0] == '/' {
+		searchPath = searchPath[1:]
+	}
+	if len(searchPath) > 0 && searchPath[len(searchPath)-1] == '/' {
+		searchPath = searchPath[:len(searchPath)-1]
+	}
+
+	// Zero-allocation iteration
+	for len(searchPath) > 0 || n != nil {
+		if len(searchPath) == 0 {
+			if n.Handler != nil {
+				return &n.Route, nil
+			}
+			if n.catchAllNode != nil {
+				if ctx != nil {
+					ctx.AddParam(n.catchAllName, "")
+				}
+				if n.catchAllNode.Handler != nil {
+					return &n.catchAllNode.Route, nil
+				}
+			}
+			return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
+		}
+
 		var part string
 		i := strings.IndexByte(searchPath, '/')
 		if i < 0 {
@@ -100,104 +232,57 @@ func (r *TrieRouter) findNode(method, path string, ctx *amaro.Context) (*trieNod
 			continue
 		}
 
-		if n, ok := node.children[part]; ok {
-			node = n
-		} else {
-			matched := false
-			for key, dyn := range node.children {
-				if len(key) > 1 && key[0] == '{' && key[len(key)-1] == '}' {
-					if ctx != nil {
-						paramName := key[1 : len(key)-1]
-						ctx.AddParam(paramName, part)
-					}
-					node = dyn
-					matched = true
-					break
-				}
-				// Wildcard check
-				if key[0] == '*' {
-					if ctx != nil {
-						paramName := key[1:] // e.g. "filepath"
-						// For wildcard, we want to match the Rest of the path?
-						// But this loop iterates by parts.
-						// Standard Trie wildcard matches until end.
-						// We need to consume all remaining parts or change loop logic?
-						// For zero-allocation, we can just say this node handles everything.
-						// But findNode iterates parts.
-						// If key is "*filepath", we should match ALL remaining path.
-						// But standard trie logic usually puts wildcard at the end.
+		// Priority: Static > Param > Wildcard
 
-						// If we found a wildcard child, we break the loop and assume match.
-						// But we need to verify if this logic holds for nested parts.
-						// Typically `*` is a terminal node.
-
-						// If part matches wildcard, we should append this part and all subsequent to param?
-						// Or just return the node?
-						// If we return the node here, findNode loop continues?
-						// No, findNode splits by `/`.
-						// If we are at `/assets` and part is `css`, we go into `*filepath`.
-						// Next part `main.css` should also be handled by `*filepath`?
-						// If `*filepath` node has no children, it should handle it?
-
-						// Implementation detail:
-						// If we encounter a wildcard node, we stop traversing parts and return it?
-						// Yes, because * should capture the rest.
-						// But we need to handle the case where we are inside the loop.
-
-						// Let's check how we handle params. We update node = dyn and break.
-						// Loop continues to next part.
-						// But wildcard matches multiple parts.
-						// So we should break the OUTER loop?
-						// Or simple hack:
-
-						// If wildcard, we consume the rest of searchPath + part?
-						// Actually `searchPath` is modified in the loop.
-						// `part` is current part.
-						// If we match wildcard, we want to set param = part + "/" + searchPath  and return node.
-
-						ctx.AddParam(paramName, part+"/"+searchPath)
-					}
-					node = dyn
-					matched = true
-					// We must assume wildcard is terminal and catches everything
-					// Break outer loop?
-					// Use goto?
-					// Or just return here.
-					return node, nil
-				}
-			}
-			if !matched {
-				return nil, fmt.Errorf("route not found")
-			}
+		// 1. Static
+		if child, found := n.children[part]; found {
+			n = child
+			continue
 		}
+
+		// 2. Param
+		if n.paramNode != nil {
+			if ctx != nil {
+				ctx.AddParam(n.paramName, part)
+			}
+			n = n.paramNode
+			continue
+		}
+
+		// 3. CatchAll
+		if n.catchAllNode != nil {
+			if ctx != nil {
+				value := part
+				if len(searchPath) > 0 {
+					value += "/" + searchPath
+				}
+				ctx.AddParam(n.catchAllName, value)
+			}
+			if n.catchAllNode.Handler != nil {
+				return &n.catchAllNode.Route, nil
+			}
+			return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
+		}
+
+		return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
 	}
 
-	if node.Handler == nil {
-		// Handle root path or check if we are at a node that has a handler
-		// But wait, the loop runs for parts. If path is "/", Trim returns "". Loop doesn't run.
-		// node is root. If root has handler, return it.
-		// Logic check: if path was just "/", we are at root[method].
-		if node.Handler == nil {
-			return nil, fmt.Errorf("route not found")
-		}
-	}
-	return node, nil
+	return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
 }
 
-func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route, error) {
-	node, err := r.findNode(method, path, ctx)
-	if err != nil {
-		return nil, err
-	}
+func (r *TrieRouter) StaticFS(pathPrefix string, fsys fs.FS) {
+	handler := amaro.StaticHandler(amaro.StaticConfig{
+		Root:   fsys,
+		Prefix: pathPrefix,
+	})
 
-	// Return the raw handler without wrapping
-	// The params are already inside ctx (if ctx was provided)
-	return &amaro.Route{
-		Method:      method,
-		Path:        path,
-		Handler:     node.Handler,
-		Middlewares: node.Middlewares,
-	}, nil
+	path := strings.TrimRight(pathPrefix, "/")
+	r.Add(http.MethodGet, path, handler)
+	r.Add(http.MethodHead, path, handler)
+
+	wildcardPath := path + "/*filepath"
+	r.Add(http.MethodGet, wildcardPath, handler)
+	r.Add(http.MethodHead, wildcardPath, handler)
 }
 
 func (r *TrieRouter) GET(path string, handler amaro.Handler, middlewares ...amaro.Middleware) error {
@@ -221,7 +306,6 @@ func (r *TrieRouter) OPTIONS(path string, handler amaro.Handler, middlewares ...
 func (r *TrieRouter) HEAD(path string, handler amaro.Handler, middlewares ...amaro.Middleware) error {
 	return r.Add(http.MethodHead, path, handler, middlewares...)
 }
-
 func (r *TrieRouter) Group(prefix string) *amaro.Group {
 	return amaro.NewGroup(prefix, r)
 }
