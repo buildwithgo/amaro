@@ -106,7 +106,7 @@ type AppOption func(*App)
 // New creates a new instance of the Amaro App with optional configuration.
 func New(options ...AppOption) *App {
 	app := &App{
-		middlewares: make([]Middleware, 0),
+		middlewares: []Middleware{Recovery()}, // Add Recovery middleware by default
 		pool: &sync.Pool{
 			New: func() interface{} {
 				// We can't fully init here because we need w/r, but we create the struct
