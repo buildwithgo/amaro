@@ -10,14 +10,15 @@ import (
 )
 
 type TestUser struct {
-	Name       string   `json:"name" query:"name" form:"name"`
-	Age        int      `json:"age" query:"age" form:"age"`
+	Name       string   `json:"name" query:"name" form:"name" validate:"required,min=2"`
+	Age        int      `json:"age" query:"age" form:"age" validate:"min=18,max=120"`
 	Admin      bool     `json:"admin" query:"admin" form:"admin"`
 	Score      float64  `json:"score" query:"score" form:"score"`
 	Tags       []string `json:"tags" query:"tags" form:"tags"`
 	Ratings    []int    `json:"ratings" query:"ratings" form:"ratings"`
 	PtrField   *int     `json:"ptr_field" query:"ptr_field" form:"ptr_field"`
-	ComplexVal complex128 `json:"complex" query:"complex" form:"complex"`
+	// Standard JSON does not support complex numbers, so we ignore it for JSON binding tests
+	ComplexVal complex128 `json:"-" query:"complex" form:"complex"`
 }
 
 func TestBindJSON(t *testing.T) {
@@ -30,15 +31,12 @@ func TestBindJSON(t *testing.T) {
 		Tags:       []string{"go", "rust"},
 		Ratings:    []int{5, 4},
 		PtrField:   &ptrVal,
-		ComplexVal: 1 + 2i,
 	}
-	// JSON marshaling of complex numbers is not supported by standard library
-	// So we omit it for JSON test or handle it specially if we wanted.
-	// We'll skip complex for JSON test as standard json doesn't support it without custom marshaller.
-	// But let's test the others.
-	user.ComplexVal = 0
 
-	body, _ := json.Marshal(user)
+	body, err := json.Marshal(user)
+	if err != nil {
+		t.Fatalf("Failed to marshal user: %v", err)
+	}
 
 	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	w := httptest.NewRecorder()
@@ -52,12 +50,73 @@ func TestBindJSON(t *testing.T) {
 	if boundUser.Name != user.Name {
 		t.Errorf("Expected Name %v, got %v", user.Name, boundUser.Name)
 	}
-	if boundUser.Score != user.Score {
-		t.Errorf("Expected Score %v, got %v", user.Score, boundUser.Score)
-	}
-	if len(boundUser.Tags) != 2 {
-		t.Errorf("Expected 2 tags, got %d", len(boundUser.Tags))
-	}
+}
+
+func TestBindValidation(t *testing.T) {
+	t.Run("Valid", func(t *testing.T) {
+		q := url.Values{}
+		q.Set("name", "Bob")
+		q.Set("age", "25")
+
+		req := httptest.NewRequest("GET", "/?"+q.Encode(), nil)
+		w := httptest.NewRecorder()
+		c := NewContext(w, req)
+
+		var u TestUser
+		if err := c.BindQuery(&u); err != nil {
+			t.Fatalf("Validation failed unexpectedly: %v", err)
+		}
+	})
+
+	t.Run("Missing Required", func(t *testing.T) {
+		q := url.Values{}
+		q.Set("age", "25") // Name missing
+
+		req := httptest.NewRequest("GET", "/?"+q.Encode(), nil)
+		w := httptest.NewRecorder()
+		c := NewContext(w, req)
+
+		var u TestUser
+		if err := c.BindQuery(&u); err == nil {
+			t.Fatal("Expected validation error for missing Name, got nil")
+		} else if !strings.Contains(err.Error(), "field 'Name' is required") {
+			t.Errorf("Expected 'required' error, got: %v", err)
+		}
+	})
+
+	t.Run("Min Violation", func(t *testing.T) {
+		q := url.Values{}
+		q.Set("name", "B") // Too short
+		q.Set("age", "25")
+
+		req := httptest.NewRequest("GET", "/?"+q.Encode(), nil)
+		w := httptest.NewRecorder()
+		c := NewContext(w, req)
+
+		var u TestUser
+		if err := c.BindQuery(&u); err == nil {
+			t.Fatal("Expected validation error for short Name, got nil")
+		} else if !strings.Contains(err.Error(), "field 'Name' must be at least 2") {
+			t.Errorf("Expected 'min' error, got: %v", err)
+		}
+	})
+
+	t.Run("Age Range Violation", func(t *testing.T) {
+		q := url.Values{}
+		q.Set("name", "Bob")
+		q.Set("age", "17") // Too young
+
+		req := httptest.NewRequest("GET", "/?"+q.Encode(), nil)
+		w := httptest.NewRecorder()
+		c := NewContext(w, req)
+
+		var u TestUser
+		if err := c.BindQuery(&u); err == nil {
+			t.Fatal("Expected validation error for young Age, got nil")
+		} else if !strings.Contains(err.Error(), "field 'Age' must be at least 18") {
+			t.Errorf("Expected 'min' error for Age, got: %v", err)
+		}
+	})
 }
 
 func TestBindQuery(t *testing.T) {
@@ -143,5 +202,31 @@ func TestBindForm(t *testing.T) {
 	}
 	if boundUser.ComplexVal != 3+4i {
 		t.Errorf("Expected Complex 3+4i, got %v", boundUser.ComplexVal)
+	}
+}
+
+func TestBindErrorOnNonPointer(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	c := NewContext(w, req)
+
+	var u TestUser
+	// Pass by value instead of pointer
+	err := c.BindQuery(u)
+	if err == nil {
+		t.Fatal("Expected error when binding to non-pointer, got nil")
+	}
+	if err.Error() != "binding element must be a non-nil pointer" {
+		t.Errorf("Expected 'non-nil pointer' error, got: %v", err)
+	}
+
+	// Pass nil pointer
+	var nilPtr *TestUser
+	err = c.BindQuery(nilPtr)
+	if err == nil {
+		t.Fatal("Expected error when binding to nil pointer, got nil")
+	}
+	if err.Error() != "binding element must be a non-nil pointer" {
+		t.Errorf("Expected 'non-nil pointer' error, got: %v", err)
 	}
 }

@@ -102,29 +102,12 @@ func Logger(opts ...LoggerOption) amaro.Middleware {
 	return func(next amaro.Handler) amaro.Handler {
 		return func(c *amaro.Context) error {
 			start := time.Now()
-			// Default status code to 200, if not written it stays 200 usually.
-			// But we need to capture the status code.
-			// amaro.Context doesn't expose the status code written unless we wrap the writer.
-			// Since amaro is zero-allocation focused, wrapping might be tricky without allocating.
-			// However, typically a logger wraps the writer.
-			// Let's check if amaro.Context has a way to get the status.
-			// It doesn't seem so from my read of context.go.
-			// So I need to wrap the response writer.
-
-			// Simple ResponseWriter wrapper to capture status code
+			// Default status code to 200.
 			lrw := &loggingResponseWriter{ResponseWriter: c.Writer, statusCode: http.StatusOK}
 			c.Writer = lrw
 
 			err := next(c)
 			duration := time.Since(start)
-
-			// If error returned and not handled, status might be different?
-			// Typically middleware is outer layer.
-			// If next(c) returns error, the error handler eventually handles it.
-			// But the logger middleware is executed *around* next(c).
-			// If an error bubbles up, we might miss the final status code set by the error handler
-			// UNLESS the error handler is inside the chain or we handle it here.
-			// But usually Logger is the first middleware.
 
 			cfg.printFunc(cfg.logger, duration, c, lrw.statusCode)
 			return err
@@ -140,4 +123,11 @@ type loggingResponseWriter struct {
 func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.statusCode = code
 	lrw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush implements the http.Flusher interface to allow streaming.
+func (lrw *loggingResponseWriter) Flush() {
+	if flusher, ok := lrw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }

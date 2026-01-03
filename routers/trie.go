@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/buildwithgo/amaro"
@@ -227,6 +228,47 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 	}
 
 	return nil, amaro.NewHTTPError(http.StatusNotFound, "route not found")
+}
+
+func (r *TrieRouter) Routes() []amaro.Route {
+	var routes []amaro.Route
+
+	// Sort methods for deterministic output
+	var methods []string
+	for m := range r.root {
+		methods = append(methods, m)
+	}
+	sort.Strings(methods)
+
+	for _, method := range methods {
+		walkNode(r.root[method], &routes)
+	}
+	return routes
+}
+
+func walkNode(n *node, routes *[]amaro.Route) {
+	if n == nil {
+		return
+	}
+	if n.Handler != nil {
+		*routes = append(*routes, n.Route)
+	}
+
+	// Walk static children (sorted for determinism)
+	var staticKeys []string
+	for k := range n.children {
+		staticKeys = append(staticKeys, k)
+	}
+	sort.Strings(staticKeys)
+	for _, k := range staticKeys {
+		walkNode(n.children[k], routes)
+	}
+
+	// Walk param
+	walkNode(n.paramNode, routes)
+
+	// Walk wildcard
+	walkNode(n.catchAllNode, routes)
 }
 
 func (r *TrieRouter) StaticFS(pathPrefix string, fsys fs.FS) {

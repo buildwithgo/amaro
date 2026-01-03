@@ -3,6 +3,7 @@ package amaro
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 // FormFile returns the first file for the provided form key.
@@ -190,23 +192,50 @@ func (c *Context) BindJSON(v interface{}) error {
 	if c.Request.Body == nil {
 		return errors.New("request body is empty")
 	}
-	return json.NewDecoder(c.Request.Body).Decode(v)
+	if err := checkPtr(v); err != nil {
+		return err
+	}
+	if err := json.NewDecoder(c.Request.Body).Decode(v); err != nil {
+		return err
+	}
+	return validateStruct(v)
 }
 
 // BindQuery binds the query parameters to the provided struct.
 func (c *Context) BindQuery(v interface{}) error {
-	return bindData(v, c.Request.URL.Query(), "query")
+	if err := checkPtr(v); err != nil {
+		return err
+	}
+	if err := bindData(v, c.Request.URL.Query(), "query"); err != nil {
+		return err
+	}
+	return validateStruct(v)
 }
 
 // BindForm binds the form parameters to the provided struct.
 func (c *Context) BindForm(v interface{}) error {
+	if err := checkPtr(v); err != nil {
+		return err
+	}
 	if err := c.Request.ParseForm(); err != nil {
 		return err
 	}
-	return bindData(v, c.Request.Form, "form")
+	if err := bindData(v, c.Request.Form, "form"); err != nil {
+		return err
+	}
+	return validateStruct(v)
+}
+
+func checkPtr(v interface{}) error {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return errors.New("binding element must be a non-nil pointer")
+	}
+	return nil
 }
 
 func bindData(ptr interface{}, data map[string][]string, tag string) error {
+	// Ptr is guaranteed to be a non-nil pointer by checkPtr
 	typ := reflect.TypeOf(ptr).Elem()
 	val := reflect.ValueOf(ptr).Elem()
 
@@ -299,4 +328,94 @@ func setField(val reflect.Value, inputs []string) error {
 		}
 	}
 	return nil
+}
+
+// validateStruct performs basic validation based on struct tags.
+// Supported tags: validate:"required,min=X,max=Y"
+func validateStruct(s interface{}) error {
+	// s is guaranteed to be a non-nil pointer by checkPtr
+	val := reflect.ValueOf(s).Elem()
+	typ := val.Type()
+
+	if val.Kind() != reflect.Struct {
+		return nil // validation only works on structs
+	}
+
+	var validationErrors []string
+
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		tag := typ.Field(i).Tag.Get("validate")
+		if tag == "" {
+			continue
+		}
+
+		rules := strings.Split(tag, ",")
+		for _, rule := range rules {
+			if rule == "required" {
+				if isZero(field) {
+					validationErrors = append(validationErrors, fmt.Sprintf("field '%s' is required", typ.Field(i).Name))
+				}
+			} else if strings.HasPrefix(rule, "min=") {
+				minVal, _ := strconv.Atoi(strings.TrimPrefix(rule, "min="))
+				if !checkMin(field, minVal) {
+					validationErrors = append(validationErrors, fmt.Sprintf("field '%s' must be at least %d", typ.Field(i).Name, minVal))
+				}
+			} else if strings.HasPrefix(rule, "max=") {
+				maxVal, _ := strconv.Atoi(strings.TrimPrefix(rule, "max="))
+				if !checkMax(field, maxVal) {
+					validationErrors = append(validationErrors, fmt.Sprintf("field '%s' must be at most %d", typ.Field(i).Name, maxVal))
+				}
+			}
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		return errors.New(strings.Join(validationErrors, "; "))
+	}
+	return nil
+}
+
+func isZero(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.String, reflect.Array, reflect.Slice, reflect.Map:
+		return v.Len() == 0
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return v.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() == 0
+	case reflect.Ptr, reflect.Interface:
+		return v.IsNil()
+	}
+	return false
+}
+
+func checkMin(v reflect.Value, min int) bool {
+	switch v.Kind() {
+	case reflect.String, reflect.Array, reflect.Slice, reflect.Map:
+		return v.Len() >= min
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() >= int64(min)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return v.Uint() >= uint64(min)
+	case reflect.Float32, reflect.Float64:
+		return v.Float() >= float64(min)
+	}
+	return true
+}
+
+func checkMax(v reflect.Value, max int) bool {
+	switch v.Kind() {
+	case reflect.String, reflect.Array, reflect.Slice, reflect.Map:
+		return v.Len() <= max
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() <= int64(max)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return v.Uint() <= uint64(max)
+	case reflect.Float32, reflect.Float64:
+		return v.Float() <= float64(max)
+	}
+	return true
 }
