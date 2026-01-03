@@ -28,7 +28,7 @@ func TestAddonsIntegration(t *testing.T) {
 	app := amaro.New(amaro.WithRouter(routers.NewTrieRouter()))
 	store := cache.NewMemoryCache()
 	// FIX: Explicitly instantiate Generic Manager with Map Type to support Set/Get usage below
-	sessMgr := sessions.NewManager[map[string]interface{}](store, "test_sess", 10*time.Minute)
+	sessMgr := sessions.New(store, "test_sess", 10*time.Minute)
 
 	app.Use(sessions.Start(sessMgr))
 

@@ -83,6 +83,12 @@ type Manager[T any] struct {
 	cache cache.Cache
 }
 
+// New creates a new session manager with map[string]interface{} as the data type.
+// This is a helper for the most common use case.
+func New(cache cache.Cache, cookieName string, ttl time.Duration) *Manager[map[string]interface{}] {
+	return NewManager[map[string]interface{}](cache, cookieName, ttl)
+}
+
 // NewManager creates a new session manager using Any Cache backend.
 func NewManager[T any](cache cache.Cache, cookieName string, ttl time.Duration) *Manager[T] {
 	return &Manager[T]{
