@@ -2,11 +2,14 @@ package amaro
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 )
 
 // FormFile returns the first file for the provided form key.
@@ -180,4 +183,120 @@ func (c *Context) Get(key string) (value interface{}, exists bool) {
 		value, exists = c.Keys[key]
 	}
 	return
+}
+
+// BindJSON binds the request body to the provided struct.
+func (c *Context) BindJSON(v interface{}) error {
+	if c.Request.Body == nil {
+		return errors.New("request body is empty")
+	}
+	return json.NewDecoder(c.Request.Body).Decode(v)
+}
+
+// BindQuery binds the query parameters to the provided struct.
+func (c *Context) BindQuery(v interface{}) error {
+	return bindData(v, c.Request.URL.Query(), "query")
+}
+
+// BindForm binds the form parameters to the provided struct.
+func (c *Context) BindForm(v interface{}) error {
+	if err := c.Request.ParseForm(); err != nil {
+		return err
+	}
+	return bindData(v, c.Request.Form, "form")
+}
+
+func bindData(ptr interface{}, data map[string][]string, tag string) error {
+	typ := reflect.TypeOf(ptr).Elem()
+	val := reflect.ValueOf(ptr).Elem()
+
+	if typ.Kind() != reflect.Struct {
+		return errors.New("binding element must be a struct")
+	}
+
+	for i := 0; i < typ.NumField(); i++ {
+		typeField := typ.Field(i)
+		structField := val.Field(i)
+
+		if !structField.CanSet() {
+			continue
+		}
+
+		inputFieldName := typeField.Tag.Get(tag)
+		if inputFieldName == "" {
+			continue
+		}
+
+		inputValue, exists := data[inputFieldName]
+		if !exists || len(inputValue) == 0 {
+			continue
+		}
+
+		if err := setField(structField, inputValue); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setField(val reflect.Value, inputs []string) error {
+	if len(inputs) == 0 {
+		return nil
+	}
+	input := inputs[0]
+
+	switch val.Kind() {
+	case reflect.Ptr:
+		if val.IsNil() {
+			val.Set(reflect.New(val.Type().Elem()))
+		}
+		return setField(val.Elem(), inputs)
+
+	case reflect.Slice:
+		slice := reflect.MakeSlice(val.Type(), len(inputs), len(inputs))
+		for i, v := range inputs {
+			if err := setField(slice.Index(i), []string{v}); err != nil {
+				return err
+			}
+		}
+		val.Set(slice)
+
+	case reflect.String:
+		val.SetString(input)
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if num, err := strconv.ParseInt(input, 10, 64); err == nil {
+			val.SetInt(num)
+		} else {
+			return err
+		}
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if num, err := strconv.ParseUint(input, 10, 64); err == nil {
+			val.SetUint(num)
+		} else {
+			return err
+		}
+
+	case reflect.Float32, reflect.Float64:
+		if num, err := strconv.ParseFloat(input, 64); err == nil {
+			val.SetFloat(num)
+		} else {
+			return err
+		}
+
+	case reflect.Bool:
+		if b, err := strconv.ParseBool(input); err == nil {
+			val.SetBool(b)
+		} else {
+			return err
+		}
+	case reflect.Complex64, reflect.Complex128:
+		if c, err := strconv.ParseComplex(input, 128); err == nil {
+			val.SetComplex(c)
+		} else {
+			return err
+		}
+	}
+	return nil
 }
