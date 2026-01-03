@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
 	"strings"
@@ -98,6 +99,14 @@ func (a *App) Static(pathPrefix, root string) {
 
 func (a *App) Find(method, path string) (*Route, error) {
 	return a.router.Find(method, path, nil)
+}
+
+// Test executes a request against the application and returns the response recorder.
+// This is a helper for writing tests.
+func (a *App) Test(req *http.Request) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	a.ServeHTTP(w, req)
+	return w
 }
 
 // AppOption defines a function to configure the App during initialization.

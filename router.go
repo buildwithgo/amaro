@@ -66,6 +66,7 @@ type Router interface {
 	Group(prefix string) *Group
 	Find(method, path string, ctx *Context) (*Route, error)
 	StaticFS(pathPrefix string, fs fs.FS)
+	Routes() []Route
 }
 
 // WithRouter returns an AppOption that configures the App to use the specified router.
