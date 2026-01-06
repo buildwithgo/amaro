@@ -163,6 +163,9 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 
 	// Zero-allocation iteration
 	for len(searchPath) > 0 || n != nil {
+		// Capture the current path state before slicing, to use in CatchAll
+		currentPath := searchPath
+
 		if len(searchPath) == 0 {
 			if n.Handler != nil {
 				return &n.Route, nil
@@ -212,11 +215,7 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 		// 3. CatchAll
 		if n.catchAllNode != nil {
 			if ctx != nil {
-				value := part
-				if len(searchPath) > 0 {
-					value += "/" + searchPath
-				}
-				ctx.AddParam(n.catchAllName, value)
+				ctx.AddParam(n.catchAllName, currentPath)
 			}
 			if n.catchAllNode.Handler != nil {
 				return &n.catchAllNode.Route, nil
