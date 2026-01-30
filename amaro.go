@@ -79,6 +79,45 @@ func (a *App) HEAD(path string, handler Handler, middlewares ...Middleware) erro
 	return a.router.Add(http.MethodHead, path, handler, middlewares...)
 }
 
+// Any registers a route that matches all standard HTTP methods.
+func (a *App) Any(path string, handler Handler, middlewares ...Middleware) error {
+	methods := []string{
+		http.MethodGet,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodDelete,
+		http.MethodPatch,
+		http.MethodOptions,
+		http.MethodHead,
+	}
+	for _, method := range methods {
+		if err := a.Add(method, path, handler, middlewares...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Mount registers an http.Handler (e.g., grpc-gateway mux) at the specified path prefix.
+// It registers the handler for all standard HTTP methods for the exact path and all subpaths.
+func (a *App) Mount(path string, handler http.Handler) error {
+	h := WrapHTTPHandler(handler)
+
+	// Exact match
+	if err := a.Any(path, h); err != nil {
+		return err
+	}
+
+	// Wildcard match for subpaths
+	wildcardPath := path
+	if !strings.HasSuffix(wildcardPath, "/") {
+		wildcardPath += "/"
+	}
+	wildcardPath += "*filepath"
+
+	return a.Any(wildcardPath, h)
+}
+
 // Add registers a new route with the specified method, path, handler, and middlewares.
 func (a *App) Add(method, path string, handler Handler, middlewares ...Middleware) error {
 	return a.router.Add(method, path, handler, middlewares...)
@@ -258,4 +297,12 @@ func Compile(handler Handler, middlewares ...Middleware) Handler {
 		handler = middlewares[i](handler)
 	}
 	return handler
+}
+
+// WrapHTTPHandler converts a standard http.Handler to an amaro.Handler.
+func WrapHTTPHandler(h http.Handler) Handler {
+	return func(c *Context) error {
+		h.ServeHTTP(c.Writer, c.Request)
+		return nil
+	}
 }

@@ -230,3 +230,21 @@ func TestBindErrorOnNonPointer(t *testing.T) {
 		t.Errorf("Expected 'non-nil pointer' error, got: %v", err)
 	}
 }
+
+func TestBindQueryFlag(t *testing.T) {
+	type SectorQuery struct {
+		Sector bool `query:"Sector"`
+	}
+	req := httptest.NewRequest("GET", "/?Sector", nil)
+	w := httptest.NewRecorder()
+	c := NewContext(w, req)
+
+	var q SectorQuery
+	if err := c.BindQuery(&q); err != nil {
+		t.Fatalf("BindQuery failed: %v", err)
+	}
+
+	if !q.Sector {
+		t.Errorf("Expected Sector to be true, got false")
+	}
+}
