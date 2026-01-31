@@ -315,7 +315,9 @@ func setField(val reflect.Value, inputs []string) error {
 		}
 
 	case reflect.Bool:
-		if b, err := strconv.ParseBool(input); err == nil {
+		if input == "" {
+			val.SetBool(true)
+		} else if b, err := strconv.ParseBool(input); err == nil {
 			val.SetBool(b)
 		} else {
 			return err

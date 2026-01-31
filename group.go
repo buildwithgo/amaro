@@ -63,6 +63,45 @@ func (g *Group) HEAD(path string, handler Handler, middlewares ...Middleware) er
 	return g.Add(http.MethodHead, path, handler, middlewares...)
 }
 
+// Any registers a route that matches all standard HTTP methods.
+func (g *Group) Any(path string, handler Handler, middlewares ...Middleware) error {
+	methods := []string{
+		http.MethodGet,
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodDelete,
+		http.MethodPatch,
+		http.MethodOptions,
+		http.MethodHead,
+	}
+	for _, method := range methods {
+		if err := g.Add(method, path, handler, middlewares...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Mount registers an http.Handler (e.g., grpc-gateway mux) at the specified path prefix within the group.
+// It registers the handler for all standard HTTP methods for the exact path and all subpaths.
+func (g *Group) Mount(path string, handler http.Handler) error {
+	h := WrapHTTPHandler(handler)
+
+	// Exact match
+	if err := g.Any(path, h); err != nil {
+		return err
+	}
+
+	// Wildcard match for subpaths
+	wildcardPath := path
+	if !strings.HasSuffix(wildcardPath, "/") {
+		wildcardPath += "/"
+	}
+	wildcardPath += "*filepath"
+
+	return g.Any(wildcardPath, h)
+}
+
 func (g *Group) Group(prefix string) *Group {
 	return NewGroup(g.prefix+prefix, g.router)
 }
