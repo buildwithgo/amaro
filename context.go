@@ -60,6 +60,24 @@ type Context struct {
 
 type ContextOption func(*Context)
 
+// Clone creates a copy of the context safe for use in goroutines.
+func (c *Context) Clone() *Context {
+	cp := *c // Shallow copy
+	// Deep copy Keys
+	if c.Keys != nil {
+		cp.Keys = make(map[string]interface{}, len(c.Keys))
+		for k, v := range c.Keys {
+			cp.Keys[k] = v
+		}
+	}
+	// Deep copy Params
+	if c.Params != nil {
+		cp.Params = make([]Param, len(c.Params))
+		copy(cp.Params, c.Params)
+	}
+	return &cp
+}
+
 // Reset resets the context to be reused in sync.Pool
 func (c *Context) Reset(w http.ResponseWriter, r *http.Request) {
 	c.Request = r
@@ -71,7 +89,9 @@ func (c *Context) Reset(w http.ResponseWriter, r *http.Request) {
 		c.Params = c.Params[:0]
 	}
 	// Reset Keys (nil them out or create new map if needed)
-	c.Keys = nil
+	if c.Keys != nil {
+		clear(c.Keys)
+	}
 }
 
 // NewContext creates a new context for the request
