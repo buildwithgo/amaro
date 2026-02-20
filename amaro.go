@@ -204,8 +204,13 @@ func (a *App) startServer(address, certFile, keyFile string) error {
 	// We just rely on Dispatch compiled in setup().
 
 	srv := &http.Server{
-		Addr:    address,
-		Handler: a,
+		Addr:              address,
+		Handler:           a,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB
 	}
 
 	// Channel to listen for errors coming from the listener.

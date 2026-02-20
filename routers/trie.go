@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/buildwithgo/amaro"
 )
@@ -30,6 +31,7 @@ type TrieRouter struct {
 	root              map[string]*node // method -> root node
 	globalMiddlewares []amaro.Middleware
 	config            amaro.RouterConfig
+	mu                sync.RWMutex
 }
 
 // TrieRouterOption configures TrieRouter.
@@ -58,10 +60,15 @@ func NewTrieRouter(opts ...TrieRouterOption) *TrieRouter {
 // Note: These middlewares are applied to all routes registered AFTER calling Use.
 // They are wrapped around the handler in Add.
 func (r *TrieRouter) Use(middleware amaro.Middleware) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.globalMiddlewares = append(r.globalMiddlewares, middleware)
 }
 
 func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares ...amaro.Middleware) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	// Prepend router-level middlewares to the route-specific middlewares
 	if len(r.globalMiddlewares) > 0 {
 		combined := make([]amaro.Middleware, 0, len(r.globalMiddlewares)+len(middlewares))
@@ -148,6 +155,9 @@ func (r *TrieRouter) Add(method, path string, handler amaro.Handler, middlewares
 }
 
 func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	n, ok := r.root[method]
 	if !ok {
 		return nil, fmt.Errorf("method not found")
@@ -230,6 +240,9 @@ func (r *TrieRouter) Find(method, path string, ctx *amaro.Context) (*amaro.Route
 }
 
 func (r *TrieRouter) Routes() []amaro.Route {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	var routes []amaro.Route
 
 	// Sort methods for deterministic output
