@@ -14,6 +14,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 // Handler is a function that handles an HTTP request.
@@ -33,6 +36,7 @@ type ServerConfig struct {
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	MaxHeaderBytes    int
+	EnableH2C         bool
 }
 
 // DefaultServerConfig returns the default server configuration.
@@ -104,6 +108,14 @@ func WithIdleTimeout(timeout time.Duration) AppOption {
 func WithMaxHeaderBytes(maxBytes int) AppOption {
 	return func(app *App) {
 		app.serverConfig.MaxHeaderBytes = maxBytes
+	}
+}
+
+// WithH2C enables HTTP/2 Cleartext (H2C) support.
+// This is useful for backend services behind a proxy that terminates TLS.
+func WithH2C() AppOption {
+	return func(app *App) {
+		app.serverConfig.EnableH2C = true
 	}
 }
 
@@ -266,14 +278,21 @@ func (a *App) startServer(address, certFile, keyFile string) error {
 	// but standard app lifecycle is: New -> Use... -> Run.
 	// We just rely on Dispatch compiled in setup().
 
+	// Determine the handler (wrap in H2C if enabled)
+	var handler http.Handler = a
+	if a.serverConfig.EnableH2C {
+		h2s := &http2.Server{}
+		handler = h2c.NewHandler(a, h2s)
+	}
+
 	srv := &http.Server{
 		Addr:              address,
-		Handler:           a,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1 MB
+		Handler:           handler,
+		ReadHeaderTimeout: a.serverConfig.ReadHeaderTimeout,
+		ReadTimeout:       a.serverConfig.ReadTimeout,
+		WriteTimeout:      a.serverConfig.WriteTimeout,
+		IdleTimeout:       a.serverConfig.IdleTimeout,
+		MaxHeaderBytes:    a.serverConfig.MaxHeaderBytes,
 	}
 
 	// Channel to listen for errors coming from the listener.
