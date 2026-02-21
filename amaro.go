@@ -14,6 +14,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 // Handler is a function that handles an HTTP request.
@@ -26,6 +29,27 @@ type Middleware func(next Handler) Handler
 // ErrorHandler is a function that handles errors occurred during request processing.
 type ErrorHandler func(c *Context, err error, code int)
 
+// ServerConfig holds the configuration for the HTTP server.
+type ServerConfig struct {
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	MaxHeaderBytes    int
+	EnableH2C         bool
+}
+
+// DefaultServerConfig returns the default server configuration.
+func DefaultServerConfig() ServerConfig {
+	return ServerConfig{
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB
+	}
+}
+
 // App is the main entry point for the Amaro framework.
 // It holds the router, global middlewares, and a context pool.
 type App struct {
@@ -35,12 +59,63 @@ type App struct {
 	handler      Handler
 	once         sync.Once
 	errorHandler ErrorHandler
+	serverConfig ServerConfig
 }
 
 // WithErrorHandler returns an AppOption that configures the App to use the specified ErrorHandler.
 func WithErrorHandler(handler ErrorHandler) AppOption {
 	return func(app *App) {
 		app.errorHandler = handler
+	}
+}
+
+// WithServerConfig returns an AppOption that configures the App to use the specified ServerConfig.
+func WithServerConfig(config ServerConfig) AppOption {
+	return func(app *App) {
+		app.serverConfig = config
+	}
+}
+
+// WithReadHeaderTimeout sets the ReadHeaderTimeout for the HTTP server.
+func WithReadHeaderTimeout(timeout time.Duration) AppOption {
+	return func(app *App) {
+		app.serverConfig.ReadHeaderTimeout = timeout
+	}
+}
+
+// WithReadTimeout sets the ReadTimeout for the HTTP server.
+func WithReadTimeout(timeout time.Duration) AppOption {
+	return func(app *App) {
+		app.serverConfig.ReadTimeout = timeout
+	}
+}
+
+// WithWriteTimeout sets the WriteTimeout for the HTTP server.
+func WithWriteTimeout(timeout time.Duration) AppOption {
+	return func(app *App) {
+		app.serverConfig.WriteTimeout = timeout
+	}
+}
+
+// WithIdleTimeout sets the IdleTimeout for the HTTP server.
+func WithIdleTimeout(timeout time.Duration) AppOption {
+	return func(app *App) {
+		app.serverConfig.IdleTimeout = timeout
+	}
+}
+
+// WithMaxHeaderBytes sets the MaxHeaderBytes for the HTTP server.
+func WithMaxHeaderBytes(maxBytes int) AppOption {
+	return func(app *App) {
+		app.serverConfig.MaxHeaderBytes = maxBytes
+	}
+}
+
+// WithH2C enables HTTP/2 Cleartext (H2C) support.
+// This is useful for backend services behind a proxy that terminates TLS.
+func WithH2C() AppOption {
+	return func(app *App) {
+		app.serverConfig.EnableH2C = true
 	}
 }
 
@@ -203,9 +278,21 @@ func (a *App) startServer(address, certFile, keyFile string) error {
 	// but standard app lifecycle is: New -> Use... -> Run.
 	// We just rely on Dispatch compiled in setup().
 
+	// Determine the handler (wrap in H2C if enabled)
+	var handler http.Handler = a
+	if a.serverConfig.EnableH2C {
+		h2s := &http2.Server{}
+		handler = h2c.NewHandler(a, h2s)
+	}
+
 	srv := &http.Server{
-		Addr:    address,
-		Handler: a,
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: a.serverConfig.ReadHeaderTimeout,
+		ReadTimeout:       a.serverConfig.ReadTimeout,
+		WriteTimeout:      a.serverConfig.WriteTimeout,
+		IdleTimeout:       a.serverConfig.IdleTimeout,
+		MaxHeaderBytes:    a.serverConfig.MaxHeaderBytes,
 	}
 
 	// Channel to listen for errors coming from the listener.

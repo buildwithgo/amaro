@@ -3,6 +3,7 @@ package middlewares
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/buildwithgo/amaro"
@@ -46,23 +47,41 @@ func (l *rateLimiter) Allow() bool {
 func RateLimiter(requestsPerSecond float64, burst int) amaro.Middleware {
 	type client struct {
 		limiter  *rateLimiter
-		lastSeen time.Time
+		lastSeen atomic.Int64 // UnixNano
 	}
 
-	var mu sync.Mutex
+	var mu sync.RWMutex
 	clients := make(map[string]*client)
 
 	// Cleanup routine (leak prevention) - strictly primitive
 	go func() {
 		for {
 			time.Sleep(1 * time.Minute)
-			mu.Lock()
+			limit := int64(3 * time.Minute)
+
+			// Snapshot expired keys
+			mu.RLock()
+			var toDelete []string
+			now := time.Now().UnixNano()
 			for ip, c := range clients {
-				if time.Since(c.lastSeen) > 3*time.Minute {
-					delete(clients, ip)
+				if now - c.lastSeen.Load() > limit {
+					toDelete = append(toDelete, ip)
 				}
 			}
-			mu.Unlock()
+			mu.RUnlock()
+
+			if len(toDelete) > 0 {
+				mu.Lock()
+				now = time.Now().UnixNano()
+				for _, ip := range toDelete {
+					if c, ok := clients[ip]; ok {
+						if now - c.lastSeen.Load() > limit {
+							delete(clients, ip)
+						}
+					}
+				}
+				mu.Unlock()
+			}
 		}
 	}()
 
@@ -71,21 +90,29 @@ func RateLimiter(requestsPerSecond float64, burst int) amaro.Middleware {
 			ip := c.Request.RemoteAddr
 			// Simplified IP matching
 
-			mu.Lock()
+			mu.RLock()
 			cli, exists := clients[ip]
+			mu.RUnlock()
+
 			if !exists {
-				cli = &client{
-					limiter: &rateLimiter{
-						rate:      requestsPerSecond,
-						burst:     burst,
-						tokens:    float64(burst),
-						lastCheck: time.Now(),
-					},
+				mu.Lock()
+				cli, exists = clients[ip]
+				if !exists {
+					cli = &client{
+						limiter: &rateLimiter{
+							rate:      requestsPerSecond,
+							burst:     burst,
+							tokens:    float64(burst),
+							lastCheck: time.Now(),
+						},
+					}
+					cli.lastSeen.Store(time.Now().UnixNano())
+					clients[ip] = cli
 				}
-				clients[ip] = cli
+				mu.Unlock()
 			}
-			cli.lastSeen = time.Now()
-			mu.Unlock()
+
+			cli.lastSeen.Store(time.Now().UnixNano())
 
 			if !cli.limiter.Allow() {
 				c.String(http.StatusTooManyRequests, "Too Many Requests")
